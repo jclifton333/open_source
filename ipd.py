@@ -8,6 +8,8 @@ from torch.autograd import grad
 from random import uniform
 from functools import partial
 from abc import ABCMeta, abstractmethod
+import pdb
+import optim
 import random
 import sys
 
@@ -46,7 +48,7 @@ class PDLearner(metaclass=ABCMeta):
     :return:
     """
     # Get correct updates
-    dVd1, dVd2 = bargaining_updater(V, (params1, params2), create_graph=True)
+    dVd1, dVd2 = bargaining_updater(V((params1, params2)), (params1, params2), create_graph=True)
     bargaining_update1 = (lr * dVd1).data
     bargaining_update2 = (lr * dVd2).data
     return bargaining_update1, bargaining_update2
@@ -67,10 +69,10 @@ class PDLearner(metaclass=ABCMeta):
       lr_opponent = lr
 
     # Get actual updates
-    update1 = updater1(V, lambda p1, p2: self.payoffs(self.outcomes)[0], (params1, params2), 1, defect2,
-                       create_graph=True)
-    update2 = updater2(V, lambda p1, p2: self.payoffs(self.outcomes)[1], (params1, params2), 2, defect1,
-                       create_graph=True)
+    update1 = updater1(V, lambda p1, p2: self.payoffs(self.outcomes(p1, p2))[0], params1, params2, 1, defect2,
+                       lr)
+    update2 = updater2(V, lambda p1, p2: self.payoffs(self.outcomes(p1, p2))[1], params1, params2, 2, defect1,
+                       lr)
 
     return update1, update2
 
@@ -86,6 +88,7 @@ class PDLearner(metaclass=ABCMeta):
             init_params1=None,
             init_params2=None,
             plot_learning=True,
+            suboptimality_tolerance=0.1,
             **kwargs,  # these are forwarded to the parameters-to-outcomes function
             ):
     self.pr_CC_log = np.empty(n_epochs)
@@ -108,13 +111,19 @@ class PDLearner(metaclass=ABCMeta):
     params2.requires_grad_()
 
     for i in range(n_epochs):
+      print(i)
       outcomes = self.outcomes(params1, params2, **kwargs)
       assert T.allclose(T.sum(outcomes), T.tensor(1.), rtol=1e-3), f"Epoch {i + 1}: outcomes not normalized"
       assert (outcomes >= 0.).byte().all(), f"Epoch {i + 1}: outcomes not non-negative"
       self.pr_CC_log[i] = pCC = outcomes[0].data
       self.pr_DD_log[i] = pDD = outcomes[3].data
       V1, V2 = self.payoffs(outcomes)
-      V = V1 * V2
+
+      def V(p1p2):
+        p1, p2 = p1p2
+        V1_, V2_ = self.payoffs(self.outcomes(p1, p2))
+        return (V1_ + V2_).requires_grad_()
+
       self.payoffs1_log[i] = V1
       self.payoffs2_log[i] = V2
       if n_print_every and i % n_print_every == 0:
@@ -127,23 +136,26 @@ class PDLearner(metaclass=ABCMeta):
         lr_opponent,
         params1,
         params2,
-        self.defect1,
-        self.defect2,
         updater1,
         updater2,
+        self.defect1,
+        self.defect2,
         V
       )
       bargaining_update1, bargaining_update2 = self.bargaining_updates(lr, params1, params2, bargaining_updater, V,
                                                                        suboptimality_tolerance)
-      V_bargaining = V((params1 + bargaining_update1, params2 + bargaining_update2))
-      if V_bargaining < V((params1 + bargaining_update1, params2 + update2)) + suboptimality_tolerance:
+      V_bargaining = V((params1 + bargaining_update1, params2 + bargaining_update2)).detach().numpy()
+      if np.abs(V_bargaining - V((params1 + bargaining_update1, params2 + update2)).detach().numpy()) \
+              < suboptimality_tolerance:
         self.defect2 = False
       else:
         self.defect2 = True
-      if V_bargaining < V((params1 + update1, params2 + bargaining_update2)) + suboptimality_tolerance:
+      if np.abs(V_bargaining - V((params1 + update1, params2 + bargaining_update2)).detach().numpy()) \
+              < suboptimality_tolerance:
         self.defect1 = False
       else:
         self.defect1 = True
+      print(self.defect1, self.defect2)
 
       # Do updates
       params1.data += update1
@@ -177,6 +189,10 @@ class IPD(PDLearner):
     self.num_params2 = 5
 
   def outcomes(self, params1, params2, gamma=0.99):
+    if type(params1) is np.ndarray or type(params2) is  np.ndarray:
+      params1 = T.from_numpy(params1).float()
+      params2 = T.from_numpy(params2).float()
+
     probs1 = T.sigmoid(params1)
     probs2 = T.sigmoid(params2)
     P = T.stack([
@@ -194,4 +210,4 @@ class IPD(PDLearner):
 
 if __name__ == "__main__":
   ipd = IPD()
-  ipd.learn(5, optim.gradient_ascent_minmax, optim.gradient_ascent_minmax, grad)
+  ipd.learn(10, optim.gradient_ascent_minmax, optim.gradient_ascent_minmax, grad)
