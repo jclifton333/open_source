@@ -31,6 +31,10 @@ class PDLearner(metaclass=ABCMeta):
     pass
 
   def payoffs(self, outcomes):
+    """
+    :param outcomes:
+    :return:
+    """
     payoffs1 = T.tensor([-1., -3., 0., -2.])
     payoffs2 = T.tensor([-1., 0., -3., -2.])
     return T.dot(outcomes, payoffs1), T.dot(outcomes, payoffs2)
@@ -63,13 +67,18 @@ class PDLearner(metaclass=ABCMeta):
       lr_opponent = lr
 
     # Get actual updates
-    update1 = updater1(V, (params1, params2), defect2, create_graph=True)
-    update2 = updater2(V, (params1, params2), defect1, create_graph=True)
+    update1 = updater1(V, lambda p1, p2: self.payoffs(self.outcomes)[0], (params1, params2), 1, defect2,
+                       create_graph=True)
+    update2 = updater2(V, lambda p1, p2: self.payoffs(self.outcomes)[1], (params1, params2), 2, defect1,
+                       create_graph=True)
 
     return update1, update2
 
   def learn(self,
             lr,
+            updater1,
+            updater2,
+            bargaining_updater,
             lr_opponent=None,
             std=0.01,
             n_epochs=2000,
@@ -104,7 +113,8 @@ class PDLearner(metaclass=ABCMeta):
       assert (outcomes >= 0.).byte().all(), f"Epoch {i + 1}: outcomes not non-negative"
       self.pr_CC_log[i] = pCC = outcomes[0].data
       self.pr_DD_log[i] = pDD = outcomes[3].data
-      V = self.payoffs(outcomes)
+      V1, V2 = self.payoffs(outcomes)
+      V = V1 * V2
       self.payoffs1_log[i] = V1
       self.payoffs2_log[i] = V2
       if n_print_every and i % n_print_every == 0:
@@ -119,6 +129,8 @@ class PDLearner(metaclass=ABCMeta):
         params2,
         self.defect1,
         self.defect2,
+        updater1,
+        updater2,
         V
       )
       bargaining_update1, bargaining_update2 = self.bargaining_updates(lr, params1, params2, bargaining_updater, V,
@@ -159,7 +171,7 @@ class PDLearner(metaclass=ABCMeta):
 
 
 class IPD(PDLearner):
-  def __init__(self):
+  def __init__(self, updater1=optim.gradient_ascent_minmax, updater2=optim.gradient_ascent_minmax):
     super().__init__()
     self.num_params1 = 5
     self.num_params2 = 5
@@ -178,3 +190,8 @@ class IPD(PDLearner):
     infi_sum = T.inverse(T.eye(4) - gamma * transition_matrix)
     avg_state = (1 - gamma) * T.matmul(infi_sum, s0)
     return avg_state
+
+
+if __name__ == "__main__":
+  ipd = IPD()
+  ipd.learn(5, optim.gradient_ascent_minmax, optim.gradient_ascent_minmax, grad)
