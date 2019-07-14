@@ -1,12 +1,14 @@
 """
-Credit to Adrian Hutter from whom I copied some code.
+Iterated games with policy gradient learning.
 """
+
 import numpy as np
 import matplotlib.pyplot as plt
 import torch as T
 from torch.autograd import grad
 from random import uniform
 from functools import partial
+from scipy.special import expit
 from abc import ABCMeta, abstractmethod
 import pdb
 import optim
@@ -14,26 +16,50 @@ import random
 import sys
 
 
-class PDLearner(metaclass=ABCMeta):
-  def __init__(self, **kwargs):
+
+class PD_PGLearner(metaclass=ABCMeta):
+  # ToDo: check that payoffs are in correct order
+  def __init__(self, payoffs1=[[-1., -3.], [0., -2.]], payoffs2=[[-1., 0.], [-3., -2.]], **kwargs):
     # overwrite these in child classes; **kwargs can be used here
     self.num_params1 = -1
     self.num_params2 = -1
     # generate these when learning
     self.pr_CC_log = None
     self.pr_DD_log = None
+    self.payoffs1 = payoffs1
+    self.payoffs2 = payoffs2
     self.payoffs1_log = None
     self.payoffs2_log = None
     self.defect1 = False
     self.defect2 = False
+    self.reward_history = None
+    self.action_history = None
+    self.state_history = None
+    self.ipw_history = None
 
   @abstractmethod
-  def payoffs(self, **kwargs):
-    """
-    :param outcomes:
-    :return:
-    """
+  def payoffs(self, params1, params2, ipw_history, reward_history, action_history, state_history):
     pass
+
+  def outcomes(self, params1, params2):
+    # ToDo: should depend on state!
+    # Draw actions from policies
+    a1 = np.random.choice(p=expit(params1))
+    a2 = np.random.choice(p=expit(params2))
+
+    # Get ipws
+    # ToDo
+    ipw_1 = None
+    ipw_2 = None
+
+    # Draw rewards
+    mu1 = self.payoffs1[a1, a2]
+    mu2 = self.payoffs2[a2, a1]
+    r1 = np.random.normal(mu1, 1.)
+    r2 = np.random.normal(m2, 1.)
+
+    return r1, r2, a1, a2, ipw_1, ipw_2
+
 
   def bargaining_updates(self, lr, params1, params2, bargaining_updater, V, suboptimality_tolerance):
     """
@@ -62,12 +88,12 @@ class PDLearner(metaclass=ABCMeta):
       lr_opponent = lr
 
     # Get actual updates
-    update1 = updater1(V, lambda p1, p2: self.payoffs(self.outcomes(p1, p2))[0], params1, params2, 1, defect2,
-                       lr)
-    update2 = updater2(V, lambda p1, p2: self.payoffs(self.outcomes(p1, p2))[1], params1, params2, 2, defect1,
-                       lr)
+    update1, a_punish_1 = updater1(V, lambda p1, p2: self.payoffs(self.outcomes(p1, p2))[0], params1, params2, 1, defect2,
+                                   lr)
+    update2, a_punish_2 = updater2(V, lambda p1, p2: self.payoffs(self.outcomes(p1, p2))[1], params1, params2, 2, defect1,
+                                   lr)
 
-    return update1, update2
+    return update1, update2, a_punish_1, a_punish_2
 
   def learn(self,
             lr,
@@ -88,6 +114,10 @@ class PDLearner(metaclass=ABCMeta):
     self.pr_DD_log = np.empty(n_epochs)
     self.payoffs1_log = np.empty(n_epochs)
     self.payoffs2_log = np.empty(n_epochs)
+    self.reward_history = np.array([])
+    self.action_history = np.array([])
+    self.state_history = np.array([])
+    self.ipw_history = np.array([])
 
     params1 = std * T.randn(self.num_params1)
     if init_params1:
@@ -105,18 +135,26 @@ class PDLearner(metaclass=ABCMeta):
 
     for i in range(n_epochs):
       print(i)
-      outcomes = self.outcomes(params1, params2, **kwargs)
-      assert T.allclose(T.sum(outcomes), T.tensor(1.), rtol=1e-3), f"Epoch {i + 1}: outcomes not normalized"
-      assert (outcomes >= 0.).byte().all(), f"Epoch {i + 1}: outcomes not non-negative"
+
+      # Observe rewards and actions
+      # ToDo: update state history
+      r1, r2, a1, a2, ipw_1, ipw_2 = self.outcomes(params1, params2)
+      self.reward_history.append((r1, r2))
+      self.action_history.append((a1, a2))
+      self.ipw_history.append((ipw_1, ipw_2))
+
+      # ToDo: read of pr_CC, pr_DD
       self.pr_CC_log[i] = pCC = outcomes[0].data
       self.pr_DD_log[i] = pDD = outcomes[3].data
-      V1, V2 = self.payoffs(outcomes)
 
+      # Define value function estimator
+      V1, V2 = self.payoffs(params1, params2, ipw_history, reward_history, action_history, state_history)
       def V(p1p2):
         p1, p2 = p1p2
-        V1_, V2_ = self.payoffs(self.outcomes(p1, p2))
+        V1_, V2_ = self.payoffs(p1, p2, self.ipw_history, self.reward_history, self.action_history, self.state_history)
         return (V1_ + V2_).requires_grad_()
 
+      # ToDo: fix payoffs log (V1, V2 are no longer true payoffs)
       self.payoffs1_log[i] = V1
       self.payoffs2_log[i] = V2
       if n_print_every and i % n_print_every == 0:
@@ -124,7 +162,7 @@ class PDLearner(metaclass=ABCMeta):
       # noinspection PyInterpreter
 
       # Compare to the bargaining updates
-      update1, update2 = self.gradient_ascent(
+      update1, update2, a_punish_1, a_punish_2 = self.gradient_ascent(
         lr,
         lr_opponent,
         params1,
@@ -175,42 +213,7 @@ class PDLearner(metaclass=ABCMeta):
       print("This learner has not learnt yet.")
 
 
-class IPD(PDLearner):
-  def __init__(self, updater1=optim.gradient_ascent_minmax, updater2=optim.gradient_ascent_minmax):
-    super().__init__()
-    self.num_params1 = 5
-    self.num_params2 = 5
-
-  def outcomes(self, params1, params2, gamma=0.99):
-    if type(params1) is np.ndarray or type(params2) is  np.ndarray:
-      params1 = T.from_numpy(params1).float()
-      params2 = T.from_numpy(params2).float()
-
-    probs1 = T.sigmoid(params1)
-    probs2 = T.sigmoid(params2)
-    P = T.stack([
-      probs1 * probs2,
-      probs1 * (1 - probs2),
-      (1 - probs1) * probs2,
-      (1 - probs1) * (1 - probs2)
-    ])
-    s0 = P[:, 0]
-    transition_matrix = P[:, 1:]
-    infi_sum = T.inverse(T.eye(4) - gamma * transition_matrix)
-    avg_state = (1 - gamma) * T.matmul(infi_sum, s0)
-    return avg_state
-
-  def payoffs(self, outcomes):
-    """
-    :param outcomes:
-    :return:
-    """
-    payoffs1 = T.tensor([-1., -3., 0., -2.])
-    payoffs2 = T.tensor([-1., 0., -3., -2.])
-    return T.dot(outcomes, payoffs1), T.dot(outcomes, payoffs2)
-
-
-class IPD_PG(PDLearner):
+class IPD_PG(PD_PGLearner):
   """
   IPD with policy gradient instead of exact solution.
   """
@@ -258,13 +261,3 @@ class IPD_PG(PDLearner):
     return value_estimate_1, value_estimate_2
 
 
-
-
-
-
-
-
-
-if __name__ == "__main__":
-  ipd = IPD()
-  ipd.learn(10, optim.gradient_ascent_minmax, optim.gradient_ascent_minmax, grad)

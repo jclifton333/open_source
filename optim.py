@@ -37,8 +37,9 @@ def constrained_minmax(V_opponent, params1, params2, lr, player):
   return outer_res.x
 
 
-def gradient_ascent_minmax(V, V_opponent, params1, params2, player, defect, lr, create_graph=True):
+def gradient_ascent_minmax_parameter(V, V_opponent, params1, params2, player, defect, lr, create_graph=True):
   """
+  Take the minmax gradient update if defect.
 
   :param V:
   :param defect:
@@ -56,4 +57,35 @@ def gradient_ascent_minmax(V, V_opponent, params1, params2, player, defect, lr, 
     else:
       update = (dVd2 * lr).data
   return update
+
+
+def gradient_ascent_minmax_reward(V, R_opponent, params1, params2, lr, player, defect):
+  """
+  Take the minmax action with respect to the opponent's estimated reward if defect.
+
+  :param V:
+  :param R_opponent:
+  :param params1:
+  :param params2:
+  :param lr:
+  :param player:
+  :return:
+  """
+  # Get update
+  dVd1, dVd2 = grad(V((params1, params2)), (params1, params2), retain_graph=True, create_graph=True)
+  if player == 1:
+    update = (dVd1 * lr).data
+  else:
+    update = (dVd2 * lr).data
+
+  # If defect, return minmax action
+  if defect:
+    max_a1 = np.max((R_opponent(0, 0), R_opponent(1, 0)))
+    max_a2 = np.max((R_opponent(0, 1), R_opponent(1, 1)))
+    a_punish = np.argmin((max_a1, max_a2))
+  else:
+    a_punish = None
+
+  return update, a_punish
+
 
