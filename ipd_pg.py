@@ -21,8 +21,8 @@ set_detect_anomaly(True)
 class PD_PGLearner(metaclass=ABCMeta):
   # ToDo: check that payoffs are in correct order
   def __init__(self,
-               payoffs1=np.array([[-1., -3.], [0., -2.]]),
-               payoffs2=np.array([[-1., 0.], [-3., -2.]]),
+               payoffs1=np.array([[0., -2], [-3, -1]]),
+               payoffs2=np.array([[0., -2], [-3, -1]]),
                **kwargs):
     # overwrite these in child classes; **kwargs can be used here
     self.num_params1 = -1
@@ -226,6 +226,7 @@ class PD_PGLearner(metaclass=ABCMeta):
       else:
         self.defect1 = True
       print(self.defect1, self.defect2)
+      print(self.a_punish_1, self.a_punish_2)
 
       # Do updates
       params1.data += update1
@@ -282,7 +283,9 @@ class IPD_PG(PD_PGLearner):
     value_estimate_1 = 0.
     value_estimate_2 = 0.
     is_normalizer = 0. # For stability
-    for ipw, r, a, s in zip(ipw_history, reward_history, action_history, state_history):
+    look_back = np.min((0, len(ipw_history) - 10))
+    for ipw, r, a, s in zip(ipw_history[look_back:], reward_history[look_back:], action_history[look_back:],
+                            state_history[look_back:]):
       # Get prob of a under probs1, probs2
       # ToDo: assuming params are in order [CC, CD, DC, DD]; check this!
       s1, s2 = s
@@ -302,4 +305,5 @@ class IPD_PG(PD_PGLearner):
 
 if __name__ == "__main__":
   ipd = IPD_PG()
-  ipd.learn(10, optim.gradient_ascent_minmax_reward, optim.gradient_ascent_minmax_reward, grad)
+  ipd.learn(0.5, optim.gradient_ascent_minmax_reward, optim.gradient_ascent_minmax_reward, grad,
+            n_epochs=100)
