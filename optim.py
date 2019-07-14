@@ -59,7 +59,7 @@ def gradient_ascent_minmax_parameter(V, V_opponent, params1, params2, player, de
   return update
 
 
-def gradient_ascent_minmax_reward(V, R_opponent, params1, params2, lr, player, defect):
+def gradient_ascent_minmax_reward(V, params1, params2, lr, player, defect, R_opponent):
   """
   Take the minmax action with respect to the opponent's estimated reward if defect.
 

@@ -36,21 +36,26 @@ class PD_PGLearner(metaclass=ABCMeta):
     self.action_history = None
     self.state_history = None
     self.ipw_history = None
+    self.opponent_reward_estimates_1 = None # For punishment policy
+    self.opponent_reward_estimates_2 = None
+    self.current_state = None
+    self.a_punish_1 = None
+    self.a_punish_2 = None
 
   @abstractmethod
   def payoffs(self, params1, params2, ipw_history, reward_history, action_history, state_history):
     pass
 
-  def outcomes(self, params1, params2):
-    # ToDo: should depend on state!
+  def outcomes(self, params1, params2, s1, s2):
     # Draw actions from policies
-    a1 = np.random.choice(p=expit(params1))
-    a2 = np.random.choice(p=expit(params2))
+    probs1 = T.sigmoid(params1[(2*s1):(2*s1+1)])
+    probs2 = T.sigmoid(params2[(2*s2):(2*s2+1)])
+    a1 = np.random.choice(p=probs1)
+    a2 = np.random.choice(p=probs2)
 
     # Get ipws
-    # ToDo
-    ipw_1 = None
-    ipw_2 = None
+    ipw_1 = 1. / probs1[2*s1+a1]
+    ipw_2 = 1. / probs2[2*s2+a2]
 
     # Draw rewards
     mu1 = self.payoffs1[a1, a2]
@@ -83,15 +88,15 @@ class PD_PGLearner(metaclass=ABCMeta):
                       defect1,
                       defect2,
                       V,
-                      ):
+                      R_opponent_1,
+                      R_opponent_2):
     if lr_opponent is None:
       lr_opponent = lr
 
     # Get actual updates
-    update1, a_punish_1 = updater1(V, lambda p1, p2: self.payoffs(self.outcomes(p1, p2))[0], params1, params2, 1, defect2,
-                                   lr)
-    update2, a_punish_2 = updater2(V, lambda p1, p2: self.payoffs(self.outcomes(p1, p2))[1], params1, params2, 2, defect1,
-                                   lr)
+    # Currently assuming punishment policy of the form minmax Reward_estimator
+    update1, a_punish_1 = updater1(V, params1, params2, lr, 1, defect2, R_opponent_1)
+    update2, a_punish_2 = updater2(V, params1, params2, lr, 2, defect1, R_opponent_2)
 
     return update1, update2, a_punish_1, a_punish_2
 
@@ -118,6 +123,9 @@ class PD_PGLearner(metaclass=ABCMeta):
     self.action_history = np.array([])
     self.state_history = np.array([])
     self.ipw_history = np.array([])
+    self.opponent_reward_estimates_1 = np.zeros((2, 2, 2))  # Agent 2 reward at (state_1, a_2, a_1)
+    self.opponent_reward_estimates_2 = np.zeros((2, 2, 2))  # Agent 1 reward at (state_2, a_1, a_2)
+    self.current_state = (0, 0) # Start off both cooperating
 
     params1 = std * T.randn(self.num_params1)
     if init_params1:
@@ -137,32 +145,51 @@ class PD_PGLearner(metaclass=ABCMeta):
       print(i)
 
       # Observe rewards and actions
-      # ToDo: update state history
-      r1, r2, a1, a2, ipw_1, ipw_2 = self.outcomes(params1, params2)
+      r1, r2, a1, a2, ipw_1, ipw_2 = self.outcomes(params1, params2, self.current_state[0], self.current_state[1])
+      if self.a_punish_1 is not None: # If decided to punish on the last turn, replace with punishment action
+        a1 = self.a_punish_1
+      if self.a_punish_2 is not None:
+        a2 = self.a_punish_2
+      self.state_history.append(self.current_state)
       self.reward_history.append((r1, r2))
       self.action_history.append((a1, a2))
       self.ipw_history.append((ipw_1, ipw_2))
+      self.opponent_reward_estimates_1[self.current_state[0], a2, a1] += (r2 -
+                                                                          self.opponent_reward_estimates_1[self.current_state[0],
+                                                                                                           a2, a1]) / (i + 1)
+      self.opponent_reward_estimates_2[self.current_state[1], a1, a2] += (r1 -
+                                                                          self.opponent_reward_estimates_2[self.current_state[1],
+                                                                                                           a1, a2]) / (i + 1)
+      self.current_state = (a2, a1) # Agent i's state is agent -i's previous action
 
-      # ToDo: read of pr_CC, pr_DD
-      self.pr_CC_log[i] = pCC = outcomes[0].data
-      self.pr_DD_log[i] = pDD = outcomes[3].data
+      # ToDo: make sure parameter -> action mapping is consistent!
+      probs1 = T.sigmoid(params1)
+      probs2 = T.sigmoid(params2)
+      self.pr_CC_log[i] = probs1[0*(1-a2) + a2*3]*probs2[0*(1-a1) + 3*a1]
+      self.pr_DD_log[i] = probs1[1*(1-a2) + a2*4]*probs2[1*(1-a1) + 4*a1]
 
-      # Define value function estimator
+      # Define bargaining value function estimator
       V1, V2 = self.payoffs(params1, params2, ipw_history, reward_history, action_history, state_history)
       def V(p1p2):
         p1, p2 = p1p2
         V1_, V2_ = self.payoffs(p1, p2, self.ipw_history, self.reward_history, self.action_history, self.state_history)
         return (V1_ + V2_).requires_grad_()
 
-      # ToDo: fix payoffs log (V1, V2 are no longer true payoffs)
-      self.payoffs1_log[i] = V1
-      self.payoffs2_log[i] = V2
+      self.payoffs1_log[i] = r1
+      self.payoffs2_log[i] = r2
       if n_print_every and i % n_print_every == 0:
         print(f"Epoch {i + 1} of {n_epochs}; payoffs:\t{V1:.2f}\t{V2:.2f};\tPr[CC]:\t{pCC:.2f};\tPr[DD]:\t{pDD:.2f}")
       # noinspection PyInterpreter
 
-      # Compare to the bargaining updates
-      update1, update2, a_punish_1, a_punish_2 = self.gradient_ascent(
+      # Define opponent reward functions for punishment policy
+      def R_opponent_1(a2_, a1_):
+        return self.opponent_reward_estimates_1[a2, a2_, a1_]
+
+      def R_opponent_2(a1_, a2_):
+        return self.opponent_reward_estimates_2[a1, a1_, a2_]
+
+      # Get each agent's update
+      update1, update2, self.a_punish_1, self.a_punish_2 = self.gradient_ascent(
         lr,
         lr_opponent,
         params1,
@@ -171,11 +198,16 @@ class PD_PGLearner(metaclass=ABCMeta):
         updater2,
         self.defect1,
         self.defect2,
-        V
+        V,
+        R_opponent_1,
+        R_opponent_2
       )
+
+      # Compare to bargaining updates
       bargaining_update1, bargaining_update2 = self.bargaining_updates(lr, params1, params2, bargaining_updater, V,
                                                                        suboptimality_tolerance)
       V_bargaining = V((params1 + bargaining_update1, params2 + bargaining_update2)).detach().numpy()
+
       if np.abs(V_bargaining - V((params1 + bargaining_update1, params2 + update2)).detach().numpy()) \
               < suboptimality_tolerance:
         self.defect2 = False
