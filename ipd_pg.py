@@ -5,7 +5,7 @@ Iterated games with policy gradient learning.
 import numpy as np
 import matplotlib.pyplot as plt
 import torch as T
-from torch.autograd import grad
+from torch.autograd import grad, set_detect_anomaly
 from random import uniform
 from functools import partial
 from scipy.special import expit
@@ -15,11 +15,15 @@ import optim
 import random
 import sys
 
+set_detect_anomaly(True)
 
 
 class PD_PGLearner(metaclass=ABCMeta):
   # ToDo: check that payoffs are in correct order
-  def __init__(self, payoffs1=[[-1., -3.], [0., -2.]], payoffs2=[[-1., 0.], [-3., -2.]], **kwargs):
+  def __init__(self,
+               payoffs1=np.array([[-1., -3.], [0., -2.]]),
+               payoffs2=np.array([[-1., 0.], [-3., -2.]]),
+               **kwargs):
     # overwrite these in child classes; **kwargs can be used here
     self.num_params1 = -1
     self.num_params2 = -1
@@ -48,22 +52,25 @@ class PD_PGLearner(metaclass=ABCMeta):
 
   def outcomes(self, params1, params2, s1, s2):
     # Draw actions from policies
-    probs1 = T.sigmoid(params1[(2*s1):(2*s1+1)])
-    probs2 = T.sigmoid(params2[(2*s2):(2*s2+1)])
-    a1 = np.random.choice(p=probs1)
-    a2 = np.random.choice(p=probs2)
+    probs1 = T.sigmoid(params1[(2*s1):(2*s1+2)])
+    probs2 = T.sigmoid(params2[(2*s2):(2*s2+2)])
+    probs1 /= T.sum(probs1)
+    probs2 /= T.sum(probs2)
+    a1 = np.random.choice(range(2), p=probs1.detach().numpy())
+    a2 = np.random.choice(range(2), p=probs2.detach().numpy())
 
     # Get ipws
     ipw_1 = 1. / probs1[2*s1+a1]
     ipw_2 = 1. / probs2[2*s2+a2]
+    ipw = ipw_1 * ipw_2
 
     # Draw rewards
     mu1 = self.payoffs1[a1, a2]
     mu2 = self.payoffs2[a2, a1]
     r1 = np.random.normal(mu1, 1.)
-    r2 = np.random.normal(m2, 1.)
+    r2 = np.random.normal(mu2, 1.)
 
-    return r1, r2, a1, a2, ipw_1, ipw_2
+    return r1, r2, a1, a2, ipw
 
 
   def bargaining_updates(self, lr, params1, params2, bargaining_updater, V, suboptimality_tolerance):
@@ -119,10 +126,10 @@ class PD_PGLearner(metaclass=ABCMeta):
     self.pr_DD_log = np.empty(n_epochs)
     self.payoffs1_log = np.empty(n_epochs)
     self.payoffs2_log = np.empty(n_epochs)
-    self.reward_history = np.array([])
-    self.action_history = np.array([])
-    self.state_history = np.array([])
-    self.ipw_history = np.array([])
+    self.reward_history = []
+    self.action_history = []
+    self.state_history = []
+    self.ipw_history = []
     self.opponent_reward_estimates_1 = np.zeros((2, 2, 2))  # Agent 2 reward at (state_1, a_2, a_1)
     self.opponent_reward_estimates_2 = np.zeros((2, 2, 2))  # Agent 1 reward at (state_2, a_1, a_2)
     self.current_state = (0, 0) # Start off both cooperating
@@ -145,7 +152,7 @@ class PD_PGLearner(metaclass=ABCMeta):
       print(i)
 
       # Observe rewards and actions
-      r1, r2, a1, a2, ipw_1, ipw_2 = self.outcomes(params1, params2, self.current_state[0], self.current_state[1])
+      r1, r2, a1, a2, ipw = self.outcomes(params1, params2, self.current_state[0], self.current_state[1])
       if self.a_punish_1 is not None: # If decided to punish on the last turn, replace with punishment action
         a1 = self.a_punish_1
       if self.a_punish_2 is not None:
@@ -153,7 +160,7 @@ class PD_PGLearner(metaclass=ABCMeta):
       self.state_history.append(self.current_state)
       self.reward_history.append((r1, r2))
       self.action_history.append((a1, a2))
-      self.ipw_history.append((ipw_1, ipw_2))
+      self.ipw_history.append(ipw)
       self.opponent_reward_estimates_1[self.current_state[0], a2, a1] += (r2 -
                                                                           self.opponent_reward_estimates_1[self.current_state[0],
                                                                                                            a2, a1]) / (i + 1)
@@ -165,11 +172,11 @@ class PD_PGLearner(metaclass=ABCMeta):
       # ToDo: make sure parameter -> action mapping is consistent!
       probs1 = T.sigmoid(params1)
       probs2 = T.sigmoid(params2)
-      self.pr_CC_log[i] = probs1[0*(1-a2) + a2*3]*probs2[0*(1-a1) + 3*a1]
-      self.pr_DD_log[i] = probs1[1*(1-a2) + a2*4]*probs2[1*(1-a1) + 4*a1]
+      self.pr_CC_log[i] = probs1[0*(1-a2) + a2*2]*probs2[0*(1-a1) + 2*a1]
+      self.pr_DD_log[i] = probs1[1*(1-a2) + a2*3]*probs2[1*(1-a1) + 3*a1]
 
       # Define bargaining value function estimator
-      V1, V2 = self.payoffs(params1, params2, ipw_history, reward_history, action_history, state_history)
+      # V1, V2 = self.payoffs(params1, params2, ipw_history, reward_history, action_history, state_history)
       def V(p1p2):
         p1, p2 = p1p2
         V1_, V2_ = self.payoffs(p1, p2, self.ipw_history, self.reward_history, self.action_history, self.state_history)
@@ -189,6 +196,7 @@ class PD_PGLearner(metaclass=ABCMeta):
         return self.opponent_reward_estimates_2[a1, a1_, a2_]
 
       # Get each agent's update
+      pdb.set_trace()
       update1, update2, self.a_punish_1, self.a_punish_2 = self.gradient_ascent(
         lr,
         lr_opponent,
@@ -250,10 +258,10 @@ class IPD_PG(PD_PGLearner):
   IPD with policy gradient instead of exact solution.
   """
 
-  def __init__(self, updater1=optim.gradient_ascent_minmax, updater2=optim.gradient_ascent_minmax):
+  def __init__(self):
     super().__init__()
-    self.num_params1 = 5
-    self.num_params2 = 5
+    self.num_params1 = 4
+    self.num_params2 = 4
 
   def payoffs(self, params1, params2, ipw_history, reward_history, action_history, state_history):
     """
@@ -268,6 +276,8 @@ class IPD_PG(PD_PGLearner):
     if type(params1) is np.ndarray or type(params2) is  np.ndarray:
       params1 = T.from_numpy(params1).float()
       params2 = T.from_numpy(params2).float()
+
+    pdb.set_trace()
 
     probs1 = T.sigmoid(params1)
     probs2 = T.sigmoid(params2)
@@ -290,6 +300,11 @@ class IPD_PG(PD_PGLearner):
       value_estimate_1 += is_weight * r[0]
       value_estimate_2 += is_weight * r[1]
 
+    pdb.set_trace()
+
     return value_estimate_1, value_estimate_2
 
 
+if __name__ == "__main__":
+  ipd = IPD_PG()
+  ipd.learn(10, optim.gradient_ascent_minmax_reward, optim.gradient_ascent_minmax_reward, grad)
