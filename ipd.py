@@ -28,15 +28,12 @@ class PDLearner(metaclass=ABCMeta):
     self.defect2 = False
 
   @abstractmethod
-  def outcomes(self, params1, params2, **kwargs):
-    """returns tensor [pr_CC, pr_CD, pr_DC, pr_DD]"""
-    pass
-
-  def payoffs(self, outcomes):
+  def payoffs(self, **kwargs):
     """
     :param outcomes:
     :return:
     """
+    pass
     payoffs1 = T.tensor([-1., -3., 0., -2.])
     payoffs2 = T.tensor([-1., 0., -3., -2.])
     return T.dot(outcomes, payoffs1), T.dot(outcomes, payoffs2)
@@ -63,7 +60,6 @@ class PDLearner(metaclass=ABCMeta):
                       defect1,
                       defect2,
                       V,
-                      suboptimality_tolerance=0.1
                       ):
     if lr_opponent is None:
       lr_opponent = lr
@@ -206,6 +202,70 @@ class IPD(PDLearner):
     infi_sum = T.inverse(T.eye(4) - gamma * transition_matrix)
     avg_state = (1 - gamma) * T.matmul(infi_sum, s0)
     return avg_state
+
+  def payoffs(self, outcomes):
+    """
+    :param outcomes:
+    :return:
+    """
+    payoffs1 = T.tensor([-1., -3., 0., -2.])
+    payoffs2 = T.tensor([-1., 0., -3., -2.])
+    return T.dot(outcomes, payoffs1), T.dot(outcomes, payoffs2)
+
+
+class IPD_PG(PDLearner):
+  """
+  IPD with policy gradient instead of exact solution.
+  """
+
+  def __init__(self, updater1=optim.gradient_ascent_minmax, updater2=optim.gradient_ascent_minmax):
+    super().__init__()
+    self.num_params1 = 5
+    self.num_params2 = 5
+
+  def payoffs(self, params1, params2, ipw_history, reward_history, action_history, state_history):
+    """
+
+    :param ipw1:
+    :param ipw2:
+    :param reward_history:
+    :param action_history:
+    :param state_history:
+    :return:
+    """
+    if type(params1) is np.ndarray or type(params2) is  np.ndarray:
+      params1 = T.from_numpy(params1).float()
+      params2 = T.from_numpy(params2).float()
+
+    probs1 = T.sigmoid(params1)
+    probs2 = T.sigmoid(params2)
+
+    value_estimate_1 = 0.
+    value_estimate_2 = 0.
+    is_normalizer = 0. # For stability
+    for ipw, r, a, s in zip(ipw_history, reward_history, action_history, state_history):
+      # Get prob of a under probs1, probs2
+      # ToDo: assuming params are in order [CC, CD, DC, DD]; check this!
+      s1, s2 = s
+      a1, a2 = a
+      prob_a1 = probs1[(s1 + a1)*(1-s1) + (s1 + a1 + 1)*s1]
+      prob_a2 = probs2[(s2 + a2)*(2-s2) + (s2 + a2 + 2)*s2]
+      prob_a = prob_a1 * prob_a2
+
+      # Update value estimate
+      is_weight =  prob_a / ipw
+      is_normalizer += is_weight
+      value_estimate_1 += is_weight * r[0]
+      value_estimate_2 += is_weight * r[1]
+
+    return value_estimate_1, value_estimate_2
+
+
+
+
+
+
+
 
 
 if __name__ == "__main__":
