@@ -52,16 +52,16 @@ class PD_PGLearner(metaclass=ABCMeta):
 
   def outcomes(self, params1, params2, s1, s2):
     # Draw actions from policies
-    probs1 = T.sigmoid(params1[(2*s1):(2*s1+2)])
-    probs2 = T.sigmoid(params2[(2*s2):(2*s2+2)])
-    probs1 /= T.sum(probs1)
-    probs2 /= T.sum(probs2)
-    a1 = np.random.choice(range(2), p=probs1.detach().numpy())
-    a2 = np.random.choice(range(2), p=probs2.detach().numpy())
+    probs1 = T.sigmoid(params1[(2*s1):(2*s1+2)]).detach().numpy()
+    probs2 = T.sigmoid(params2[(2*s2):(2*s2+2)]).detach().numpy()
+    probs1 /= np.sum(probs1)
+    probs2 /= np.sum(probs2)
+    a1 = np.random.choice(range(2), p=probs1)
+    a2 = np.random.choice(range(2), p=probs2)
 
     # Get ipws
-    ipw_1 = 1. / probs1[2*s1+a1]
-    ipw_2 = 1. / probs2[2*s2+a2]
+    ipw_1 = 1. / probs1[a1]
+    ipw_2 = 1. / probs2[a2]
     ipw = ipw_1 * ipw_2
 
     # Draw rewards
@@ -196,7 +196,6 @@ class PD_PGLearner(metaclass=ABCMeta):
         return self.opponent_reward_estimates_2[a1, a1_, a2_]
 
       # Get each agent's update
-      pdb.set_trace()
       update1, update2, self.a_punish_1, self.a_punish_2 = self.gradient_ascent(
         lr,
         lr_opponent,
@@ -277,8 +276,6 @@ class IPD_PG(PD_PGLearner):
       params1 = T.from_numpy(params1).float()
       params2 = T.from_numpy(params2).float()
 
-    pdb.set_trace()
-
     probs1 = T.sigmoid(params1)
     probs2 = T.sigmoid(params2)
 
@@ -291,7 +288,7 @@ class IPD_PG(PD_PGLearner):
       s1, s2 = s
       a1, a2 = a
       prob_a1 = probs1[(s1 + a1)*(1-s1) + (s1 + a1 + 1)*s1]
-      prob_a2 = probs2[(s2 + a2)*(2-s2) + (s2 + a2 + 2)*s2]
+      prob_a2 = probs2[(s2 + a2)*(1-s2) + (s2 + a2 + 1)*s2]
       prob_a = prob_a1 * prob_a2
 
       # Update value estimate
@@ -299,8 +296,6 @@ class IPD_PG(PD_PGLearner):
       is_normalizer += is_weight
       value_estimate_1 += is_weight * r[0]
       value_estimate_2 += is_weight * r[1]
-
-    pdb.set_trace()
 
     return value_estimate_1, value_estimate_2
 
