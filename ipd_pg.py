@@ -20,13 +20,12 @@ set_detect_anomaly(True)
 
 def check_exploitability(reward_1, reward_2, player):
   # Get estimated bargaining profile
-  reward_sum = reward_1_estimates + reward_2_estimates
   best_sum = -float('inf')
   best_profile = None
-  # ToDo: check this
+
   for i in range(2):
     for j in range(2):
-      if reward_sum[i, j] > best_sum:
+      if reward_1[i, j] + reward_2[j, i] > best_sum:
         best_profile = (i, j)
 
   if player == 1:
@@ -48,13 +47,12 @@ def enforceability_ht(reward_1_estimates, reward_2_estimates, reward_1_counts, r
   :return:
   """
   # Get estimated bargaining profile
-  reward_sum = reward_1_estimates + reward_2_estimates
   best_sum = -float('inf')
   best_profile = None
-  # ToDo: check this
+
   for i in range(2):
     for j in range(2):
-      if reward_sum[i, j] > best_sum:
+      if reward_1_estimates[i, j] + reward_2_estimates[j, i] > best_sum:
         best_profile = (i, j)
 
   player_1_security = np.min((np.max(reward_1_estimates[:, 0]), np.max(reward_1_estimates[:, 1])))
@@ -62,6 +60,7 @@ def enforceability_ht(reward_1_estimates, reward_2_estimates, reward_1_counts, r
 
   # If estimated profile is exploitable, test exploitability hypothesis
   # ToDo: assuming known variance!
+  player_1_exploitable = player_2_exploitable = False # Using exploitable to mean non-enforceable
   num_non_enforceable = 0.
   if player_1_security > reward_1_estimates[best_profile[0], best_profile[1]]:
     sampling_dbn_draws_1 = np.random.normal(loc=reward_1_estimates, scale=0.1 / np.sqrt(np.maximum(reward_1_counts, 1.)),
@@ -70,6 +69,7 @@ def enforceability_ht(reward_1_estimates, reward_2_estimates, reward_1_counts, r
                                             shape=(sampling_dbn_draws, 2, 2))
     for rhat_1, rhat_2 in zip(sampling_dbn_draws_1, sampling_dbn_draws_2):
       num_non_enforceable += check_exploitability(rhat_1, rhat_2, 1)
+    player_2_exploitable = (num_non_enforceable / sampling_dbn_draws) > cutoff
   elif player_2_security > reward_2_estimates[best_profile[1], best_profile[0]]:
     sampling_dbn_draws_1 = np.random.normal(loc=reward_1_estimates, scale=0.1 / np.sqrt(np.maximum(reward_1_counts, 1.)),
                                             shape=(sampling_dbn_draws, 2, 2))
@@ -77,8 +77,8 @@ def enforceability_ht(reward_1_estimates, reward_2_estimates, reward_1_counts, r
                                             shape=(sampling_dbn_draws, 2, 2))
     for rhat_1, rhat_2 in zip(sampling_dbn_draws_1, sampling_dbn_draws_2):
       num_non_enforceable += check_exploitability(rhat_1, rhat_2, 2)
-  prop_non_enforceable = num_non_enforceable / sampling_dbn_draws
-  return prop_non_enforceable > cutoff
+    player_1_exploitable = (num_non_enforceable / sampling_dbn_draws) > cutoff
+  return player_1_exploitable, player_2_exploitable
 
 
 class PD_PGLearner(metaclass=ABCMeta):
@@ -199,6 +199,7 @@ class PD_PGLearner(metaclass=ABCMeta):
     self.opponent_reward_estimate_counts_1 = np.zeros((2, 2))
     self.opponent_reward_estimate_counts_2 = np.zeros((2, 2))
     self.current_state = (0, 0) # Start off both cooperating
+    player_1_exploitable_ = player_2_exploitable_ = False
 
     params1 = std * T.randn(self.num_params1)
     if init_params1:
@@ -242,7 +243,9 @@ class PD_PGLearner(metaclass=ABCMeta):
 
       # Conduct hypothesis test
       if hypothesis_test:
-       pass
+        player_1_exploitable_,player_2_exploitable_ = \
+          enforceability_ht(reward_1_estimates, reward_2_estimates, reward_1_counts, reward_2_counts, cutoff=0.8,
+                            sampling_dbn_draws=1000)
 
       probs1 = T.sigmoid(params1[(2*a2):(2*a2 + 2)]).detach().numpy()
       probs2 = T.sigmoid(params2[(2*a1):(2*a1 + 2)]).detach().numpy()

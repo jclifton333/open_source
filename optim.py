@@ -59,6 +59,29 @@ def gradient_ascent_minmax_parameter(V, V_opponent, params1, params2, player, de
   return update
 
 
+def max_min_exploitability_policy(R_player, R_opponent, player_exploitable, opponent_exploitable):
+  """
+  If player exploitable, play BR to opponent maxmin
+  If opponent exploitable, play maxmin
+
+  :param V:
+  :param params1:
+  :param params2:
+  :param lr:
+  :param player:
+  :param defect:
+  :param R_player:
+  :param R_opponent:
+  :param reject:
+  :return:
+  """
+  if player_exploitable:  # Play best response to max min
+    opponent_maxmin = np.argmax((np.min(R_opponent[:, 0]), np.min(R_opponent[:, 1])))
+    return _, np.argmax(R_player[:, opponent_maxmin])
+  elif opponent_exploitable:  # Play estimated maxmin
+    return _, np.argmax((np.min(R_player[:, 0]), np.min(R_player[:, 1])))
+
+
 def gradient_ascent_minmax_reward(V, params1, params2, lr, player, defect, R_opponent):
   """
   Take the minmax action with respect to the opponent's estimated reward if defect.
