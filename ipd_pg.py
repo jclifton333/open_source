@@ -183,6 +183,7 @@ class PD_PGLearner(metaclass=ABCMeta):
             init_params2=None,
             plot_learning=True,
             suboptimality_tolerance=0.1,
+            hypothesis_test=False,
             **kwargs,  # these are forwarded to the parameters-to-outcomes function
             ):
     self.pr_CC_log = np.empty(n_epochs)
@@ -239,8 +240,10 @@ class PD_PGLearner(metaclass=ABCMeta):
       print(params1, params2)
       self.current_state = (a2, a1) # Agent i's state is agent -i's previous action
 
+      # Conduct hypothesis test
+      if hypothesis_test:
+       pass
 
-      # ToDo: make sure parameter -> action mapping is consistent!
       probs1 = T.sigmoid(params1[(2*a2):(2*a2 + 2)]).detach().numpy()
       probs2 = T.sigmoid(params2[(2*a1):(2*a1 + 2)]).detach().numpy()
       probs1 /= np.sum(probs1)
@@ -379,7 +382,7 @@ class IPD_PG(PD_PGLearner):
 if __name__ == "__main__":
   pd_payoffs1 = np.array([[-1., -3.], [0., -2.]])
   pd_payoffs2 = np.array([[-1., -3.], [0., -2.]])
-  no_enforce_payoffs_1 = np.array([[0., -1.], [-1., -1.]])
+  no_enforce_payoffs_1 = np.array([[0., -1.], [-1., -0.75]])
   no_enforce_payoffs_2 = np.array([[2., 2.5], [2., 2.5]])
 
   # ipd = IPD_PG(payoffs1=pd_payoffs1, payoffs2=pd_payoffs2)
