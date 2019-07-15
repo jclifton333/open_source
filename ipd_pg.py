@@ -25,18 +25,20 @@ def check_exploitability(reward_1, reward_2, player):
 
   for i in range(2):
     for j in range(2):
-      if reward_1[i, j] + reward_2[j, i] > best_sum:
+      reward_sum = reward_1[i, j] + reward_2[j, i]
+      if reward_sum > best_sum:
         best_profile = (i, j)
+        best_sum = reward_sum
 
   if player == 1:
-    security = np.min((np.max(reward_1_estimates[:, 0]), np.max(reward_1_estimates[:, 1])))
+    security = np.max((np.min(reward_1[:, 0]), np.min(reward_1[:, 1])))
     return security > reward_1[best_profile[0], best_profile[1]]
   elif player == 2:
-    security = np.min((np.max(reward_2_estimates[:, 0]), np.max(reward_2_estimates[:, 1])))
+    security = np.max((np.min(reward_2[:, 0]), np.min(reward_2[:, 1])))
     return security > reward_1[best_profile[1], best_profile[0]]
 
 def enforceability_ht(reward_1_estimates, reward_2_estimates, reward_1_counts, reward_2_counts,
-                      cutoff=0.8, sampling_dbn_draws=1000):
+                      cutoff=0.95, sampling_dbn_draws=1000):
   """
   Test the hypothesis that the utilitarian welfare function is enforceable.
 
@@ -52,11 +54,13 @@ def enforceability_ht(reward_1_estimates, reward_2_estimates, reward_1_counts, r
 
   for i in range(2):
     for j in range(2):
-      if reward_1_estimates[i, j] + reward_2_estimates[j, i] > best_sum:
+      reward_sum = reward_1_estimates[i, j] + reward_2_estimates[j, i]
+      if reward_sum > best_sum:
         best_profile = (i, j)
+        best_sum = reward_sum
 
-  player_1_security = np.min((np.max(reward_1_estimates[:, 0]), np.max(reward_1_estimates[:, 1])))
-  player_2_security = np.min((np.max(reward_2_estimates[:, 0]), np.max(reward_2_estimates[:, 1])))
+  player_1_security = np.max((np.min(reward_1_estimates[:, 0]), np.min(reward_1_estimates[:, 1])))
+  player_2_security = np.max((np.min(reward_2_estimates[:, 0]), np.min(reward_2_estimates[:, 1])))
 
   # If estimated profile is exploitable, test exploitability hypothesis
   # ToDo: assuming known variance!
@@ -64,17 +68,17 @@ def enforceability_ht(reward_1_estimates, reward_2_estimates, reward_1_counts, r
   num_non_enforceable = 0.
   if player_1_security > reward_1_estimates[best_profile[0], best_profile[1]]:
     sampling_dbn_draws_1 = np.random.normal(loc=reward_1_estimates, scale=0.1 / np.sqrt(np.maximum(reward_1_counts, 1.)),
-                                            shape=(sampling_dbn_draws, 2, 2))
+                                            size=(sampling_dbn_draws, 2, 2))
     sampling_dbn_draws_2 = np.random.normal(loc=reward_2_estimates, scale=0.1 / np.sqrt(np.maximum(reward_2_counts, 1.)),
-                                            shape=(sampling_dbn_draws, 2, 2))
+                                            size=(sampling_dbn_draws, 2, 2))
     for rhat_1, rhat_2 in zip(sampling_dbn_draws_1, sampling_dbn_draws_2):
       num_non_enforceable += check_exploitability(rhat_1, rhat_2, 1)
     player_2_exploitable = (num_non_enforceable / sampling_dbn_draws) > cutoff
   elif player_2_security > reward_2_estimates[best_profile[1], best_profile[0]]:
     sampling_dbn_draws_1 = np.random.normal(loc=reward_1_estimates, scale=0.1 / np.sqrt(np.maximum(reward_1_counts, 1.)),
-                                            shape=(sampling_dbn_draws, 2, 2))
+                                            size=(sampling_dbn_draws, 2, 2))
     sampling_dbn_draws_2 = np.random.normal(loc=reward_2_estimates, scale=0.1 / np.sqrt(np.maximum(reward_2_counts, 1.)),
-                                            shape=(sampling_dbn_draws, 2, 2))
+                                            size=(sampling_dbn_draws, 2, 2))
     for rhat_1, rhat_2 in zip(sampling_dbn_draws_1, sampling_dbn_draws_2):
       num_non_enforceable += check_exploitability(rhat_1, rhat_2, 2)
     player_1_exploitable = (num_non_enforceable / sampling_dbn_draws) > cutoff
@@ -114,7 +118,7 @@ class PD_PGLearner(metaclass=ABCMeta):
   def payoffs(self, params1, params2, ipw_history, reward_history, action_history, state_history):
     pass
 
-  def outcomes(self, params1, params2, s1, s2):
+  def actions_from_params(self, params1, params2, s1, s2):
     # Draw actions from policies
     probs1 = T.sigmoid(params1[(2*s1):(2*s1+2)]).detach().numpy()
     probs2 = T.sigmoid(params2[(2*s2):(2*s2+2)]).detach().numpy()
@@ -128,13 +132,16 @@ class PD_PGLearner(metaclass=ABCMeta):
     ipw_2 = 1. / probs2[a2]
     ipw = ipw_1 * ipw_2
 
+    return a1, a2, ipw
+
+  def outcomes(self, a1, a2):
     # Draw rewards
     mu1 = self.payoffs1[a1, a2]
     mu2 = self.payoffs2[a2, a1]
     r1 = np.random.normal(mu1, 0.1)
     r2 = np.random.normal(mu2, 0.1)
 
-    return r1, r2, a1, a2, ipw
+    return r1, r2
 
   def bargaining_updates(self, lr, params1, params2, bargaining_updater, V, suboptimality_tolerance):
     """
@@ -184,6 +191,7 @@ class PD_PGLearner(metaclass=ABCMeta):
             plot_learning=True,
             suboptimality_tolerance=0.1,
             hypothesis_test=False,
+            exploitability_policy=None, # Must be supplied if hypothesis_test=True
             **kwargs,  # these are forwarded to the parameters-to-outcomes function
             ):
     self.pr_CC_log = np.empty(n_epochs)
@@ -218,8 +226,14 @@ class PD_PGLearner(metaclass=ABCMeta):
     for i in range(n_epochs):
       print(i)
 
-      # Observe rewards and actions
-      r1, r2, a1, a2, ipw = self.outcomes(params1, params2, self.current_state[0], self.current_state[1])
+      # Get actions from current policy
+      if not (player_1_exploitable_ or player_2_exploitable_):  # If neither is exploitable, follow param policies
+        a1, a2, ipw = self.actions_from_params(params1, params2, self.current_state[0], self.current_state[1])
+      else:
+        a1, a2, ipw = exploitability_policy(self.opponent_reward_estimates_2, self.opponent_reward_estimates_1,
+                                            player_1_exploitable_, player_2_exploitable_)
+
+      # Override actions with exploration or punishment
       if np.random.random() < 0.05:
         a1 = np.random.choice(2)
       if np.random.random() < 0.05:
@@ -228,6 +242,11 @@ class PD_PGLearner(metaclass=ABCMeta):
         a1 = self.a_punish_1
       if self.a_punish_2 is not None:
         a2 = self.a_punish_2
+
+      # Observe rewards
+      r1, r2 = self.outcomes(a1, a2)
+
+      # Update histories
       self.state_history.append(self.current_state)
       self.reward_history.append((r1, r2))
       self.action_history.append((a1, a2))
@@ -238,14 +257,17 @@ class PD_PGLearner(metaclass=ABCMeta):
         self.opponent_reward_estimate_counts_1[a2, a1]
       self.opponent_reward_estimates_2[a1, a2] += (r1 - self.opponent_reward_estimates_2[a1, a2]) / \
         self.opponent_reward_estimate_counts_2[a1, a2]
-      print(params1, params2)
       self.current_state = (a2, a1) # Agent i's state is agent -i's previous action
 
       # Conduct hypothesis test
       if hypothesis_test:
         player_1_exploitable_,player_2_exploitable_ = \
-          enforceability_ht(reward_1_estimates, reward_2_estimates, reward_1_counts, reward_2_counts, cutoff=0.8,
+          enforceability_ht(self.opponent_reward_estimates_2, self.opponent_reward_estimates_1,
+          self.opponent_reward_estimate_counts_2, self.opponent_reward_estimate_counts_1, cutoff=0.8,
                             sampling_dbn_draws=1000)
+      print(self.opponent_reward_estimates_2, self.opponent_reward_estimates_1)
+      print(player_1_exploitable_, player_2_exploitable_)
+
 
       probs1 = T.sigmoid(params1[(2*a2):(2*a2 + 2)]).detach().numpy()
       probs2 = T.sigmoid(params2[(2*a1):(2*a1 + 2)]).detach().numpy()
@@ -305,7 +327,6 @@ class PD_PGLearner(metaclass=ABCMeta):
       else:
         self.defect1 = True
       print(self.defect1, self.defect2)
-      print(self.a_punish_1, self.a_punish_2)
 
       # Do updates
       params1.data += update1
@@ -386,13 +407,14 @@ if __name__ == "__main__":
   pd_payoffs1 = np.array([[-1., -3.], [0., -2.]])
   pd_payoffs2 = np.array([[-1., -3.], [0., -2.]])
   no_enforce_payoffs_1 = np.array([[0., -1.], [-1., -0.75]])
-  no_enforce_payoffs_2 = np.array([[2., 2.5], [2., 2.5]])
+  no_enforce_payoffs_2 = np.array([[2., 2.], [2.5, 2.5]])
 
   # ipd = IPD_PG(payoffs1=pd_payoffs1, payoffs2=pd_payoffs2)
   # ipd.learn(0.5, optim.gradient_ascent_minmax_reward, optim.gradient_ascent_minmax_reward, grad,
   #           n_epochs=2000)
 
   no_enforce = IPD_PG(payoffs1=no_enforce_payoffs_1, payoffs2=no_enforce_payoffs_2)
+  # no_enforce.learn(0.5, optim.gradient_ascent_minmax_reward, optim.gradient_ascent_minmax_reward, grad,
+  #            n_epochs=100, hypothesis_test=True, exploitability_policy=optim.max_min_exploitability_policy)
   no_enforce.learn(0.5, optim.gradient_ascent_minmax_reward, optim.gradient_ascent_minmax_reward, grad,
-             n_epochs=2000)
-
+                   n_epochs=1000)

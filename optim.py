@@ -59,7 +59,7 @@ def gradient_ascent_minmax_parameter(V, V_opponent, params1, params2, player, de
   return update
 
 
-def max_min_exploitability_policy(R_player, R_opponent, player_exploitable, opponent_exploitable):
+def max_min_exploitability_policy(R_player_1, R_player_2, player_1_exploitable, player_2_exploitable):
   """
   If player exploitable, play BR to opponent maxmin
   If opponent exploitable, play maxmin
@@ -75,11 +75,23 @@ def max_min_exploitability_policy(R_player, R_opponent, player_exploitable, oppo
   :param reject:
   :return:
   """
-  if player_exploitable:  # Play best response to max min
-    opponent_maxmin = np.argmax((np.min(R_opponent[:, 0]), np.min(R_opponent[:, 1])))
-    return _, np.argmax(R_player[:, opponent_maxmin])
-  elif opponent_exploitable:  # Play estimated maxmin
-    return _, np.argmax((np.min(R_player[:, 0]), np.min(R_player[:, 1])))
+  if player_1_exploitable:
+    R_exploitable = R_player_1
+    R_exploiter = R_player_2
+  elif player_2_exploitable:
+    R_exploitable = R_player_2
+    R_exploiter = R_player_1
+
+  # Get actions
+  exploiter_maxmin = np.argmax((np.min(R_exploiter[:, 0]), np.min(R_exploiter[:, 1])))
+  exploitable_best_response = np.argmax((R_exploitable[:, exploiter_maxmin]))
+  ipw = 1.  # Play is deterministic here so ipw = 1.
+
+  # Assign actions to player number
+  a1 = player_1_exploitable*exploitable_best_response + player_2_exploitable*exploiter_maxmin
+  a2 = player_2_exploitable*exploitable_best_response + player_1_exploitable*exploiter_maxmin
+
+  return a1, a2, ipw
 
 
 def gradient_ascent_minmax_reward(V, params1, params2, lr, player, defect, R_opponent):
