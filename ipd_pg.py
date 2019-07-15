@@ -18,6 +18,69 @@ import sys
 set_detect_anomaly(True)
 
 
+def check_exploitability(reward_1, reward_2, player):
+  # Get estimated bargaining profile
+  reward_sum = reward_1_estimates + reward_2_estimates
+  best_sum = -float('inf')
+  best_profile = None
+  # ToDo: check this
+  for i in range(2):
+    for j in range(2):
+      if reward_sum[i, j] > best_sum:
+        best_profile = (i, j)
+
+  if player == 1:
+    security = np.min((np.max(reward_1_estimates[:, 0]), np.max(reward_1_estimates[:, 1])))
+    return security > reward_1[best_profile[0], best_profile[1]]
+  elif player == 2:
+    security = np.min((np.max(reward_2_estimates[:, 0]), np.max(reward_2_estimates[:, 1])))
+    return security > reward_1[best_profile[1], best_profile[0]]
+
+def enforceability_ht(reward_1_estimates, reward_2_estimates, reward_1_counts, reward_2_counts,
+                      cutoff=0.8, sampling_dbn_draws=1000):
+  """
+  Test the hypothesis that the utilitarian welfare function is enforceable.
+
+  :param reward_1_estimates:
+  :param reward_2_estimates:
+  :param reward_1_counts:
+  :param reward_2_counts:
+  :return:
+  """
+  # Get estimated bargaining profile
+  reward_sum = reward_1_estimates + reward_2_estimates
+  best_sum = -float('inf')
+  best_profile = None
+  # ToDo: check this
+  for i in range(2):
+    for j in range(2):
+      if reward_sum[i, j] > best_sum:
+        best_profile = (i, j)
+
+  player_1_security = np.min((np.max(reward_1_estimates[:, 0]), np.max(reward_1_estimates[:, 1])))
+  player_2_security = np.min((np.max(reward_2_estimates[:, 0]), np.max(reward_2_estimates[:, 1])))
+
+  # If estimated profile is exploitable, test exploitability hypothesis
+  # ToDo: assuming known variance!
+  num_non_enforceable = 0.
+  if player_1_security > reward_1_estimates[best_profile[0], best_profile[1]]:
+    sampling_dbn_draws_1 = np.random.normal(loc=reward_1_estimates, scale=0.1 / np.sqrt(np.maximum(reward_1_counts, 1.)),
+                                            shape=(sampling_dbn_draws, 2, 2))
+    sampling_dbn_draws_2 = np.random.normal(loc=reward_2_estimates, scale=0.1 / np.sqrt(np.maximum(reward_2_counts, 1.)),
+                                            shape=(sampling_dbn_draws, 2, 2))
+    for rhat_1, rhat_2 in zip(sampling_dbn_draws_1, sampling_dbn_draws_2):
+      num_non_enforceable += check_exploitability(rhat_1, rhat_2, 1)
+  elif player_2_security > reward_2_estimates[best_profile[1], best_profile[0]]:
+    sampling_dbn_draws_1 = np.random.normal(loc=reward_1_estimates, scale=0.1 / np.sqrt(np.maximum(reward_1_counts, 1.)),
+                                            shape=(sampling_dbn_draws, 2, 2))
+    sampling_dbn_draws_2 = np.random.normal(loc=reward_2_estimates, scale=0.1 / np.sqrt(np.maximum(reward_2_counts, 1.)),
+                                            shape=(sampling_dbn_draws, 2, 2))
+    for rhat_1, rhat_2 in zip(sampling_dbn_draws_1, sampling_dbn_draws_2):
+      num_non_enforceable += check_exploitability(rhat_1, rhat_2, 2)
+  prop_non_enforceable = num_non_enforceable / sampling_dbn_draws
+  return prop_non_enforceable > cutoff
+
+
 class PD_PGLearner(metaclass=ABCMeta):
   def __init__(self,
                payoffs1=np.array([[-1., -3.], [0., -2.]]),
@@ -72,7 +135,6 @@ class PD_PGLearner(metaclass=ABCMeta):
     r2 = np.random.normal(mu2, 0.1)
 
     return r1, r2, a1, a2, ipw
-
 
   def bargaining_updates(self, lr, params1, params2, bargaining_updater, V, suboptimality_tolerance):
     """
@@ -269,8 +331,8 @@ class IPD_PG(PD_PGLearner):
   IPD with policy gradient instead of exact solution.
   """
 
-  def __init__(self):
-    super().__init__()
+  def __init__(self, payoffs1, payoffs2):
+    super().__init__(payoffs1=payoffs1, payoffs2=payoffs2)
     self.num_params1 = 4
     self.num_params2 = 4
 
@@ -315,6 +377,16 @@ class IPD_PG(PD_PGLearner):
 
 
 if __name__ == "__main__":
-  ipd = IPD_PG()
-  ipd.learn(0.5, optim.gradient_ascent_minmax_reward, optim.gradient_ascent_minmax_reward, grad,
-            n_epochs=2000)
+  pd_payoffs1 = np.array([[-1., -3.], [0., -2.]])
+  pd_payoffs2 = np.array([[-1., -3.], [0., -2.]])
+  no_enforce_payoffs_1 = np.array([[0., -1.], [-1., -1.]])
+  no_enforce_payoffs_2 = np.array([[2., 2.5], [2., 2.5]])
+
+  # ipd = IPD_PG(payoffs1=pd_payoffs1, payoffs2=pd_payoffs2)
+  # ipd.learn(0.5, optim.gradient_ascent_minmax_reward, optim.gradient_ascent_minmax_reward, grad,
+  #           n_epochs=2000)
+
+  no_enforce = IPD_PG(payoffs1=no_enforce_payoffs_1, payoffs2=no_enforce_payoffs_2)
+  no_enforce.learn(0.5, optim.gradient_ascent_minmax_reward, optim.gradient_ascent_minmax_reward, grad,
+             n_epochs=2000)
+
