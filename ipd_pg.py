@@ -19,10 +19,9 @@ set_detect_anomaly(True)
 
 
 class PD_PGLearner(metaclass=ABCMeta):
-  # ToDo: check that payoffs are in correct order
   def __init__(self,
-               payoffs1=np.array([[0., -2], [-3, -1]]),
-               payoffs2=np.array([[0., -2], [-3, -1]]),
+               payoffs1=np.array([[-1., -3.], [0., -2.]]),
+               payoffs2=np.array([[-1., -3.], [0., -2.]]),
                **kwargs):
     # overwrite these in child classes; **kwargs can be used here
     self.num_params1 = -1
@@ -45,6 +44,8 @@ class PD_PGLearner(metaclass=ABCMeta):
     self.current_state = None
     self.a_punish_1 = None
     self.a_punish_2 = None
+    self.opponent_reward_estimate_counts_1 = None
+    self.opponent_reward_estimate_counts_2 = None
 
   @abstractmethod
   def payoffs(self, params1, params2, ipw_history, reward_history, action_history, state_history):
@@ -67,8 +68,8 @@ class PD_PGLearner(metaclass=ABCMeta):
     # Draw rewards
     mu1 = self.payoffs1[a1, a2]
     mu2 = self.payoffs2[a2, a1]
-    r1 = np.random.normal(mu1, 1.)
-    r2 = np.random.normal(mu2, 1.)
+    r1 = np.random.normal(mu1, 0.1)
+    r2 = np.random.normal(mu2, 0.1)
 
     return r1, r2, a1, a2, ipw
 
@@ -130,8 +131,10 @@ class PD_PGLearner(metaclass=ABCMeta):
     self.action_history = []
     self.state_history = []
     self.ipw_history = []
-    self.opponent_reward_estimates_1 = np.zeros((2, 2, 2))  # Agent 2 reward at (state_1, a_2, a_1)
-    self.opponent_reward_estimates_2 = np.zeros((2, 2, 2))  # Agent 1 reward at (state_2, a_1, a_2)
+    self.opponent_reward_estimates_1 = np.zeros((2, 2))  # Agent 2 reward at (a_2, a_1)
+    self.opponent_reward_estimates_2 = np.zeros((2, 2))  # Agent 1 reward at (a_1, a_2)
+    self.opponent_reward_estimate_counts_1 = np.zeros((2, 2))
+    self.opponent_reward_estimate_counts_2 = np.zeros((2, 2))
     self.current_state = (0, 0) # Start off both cooperating
 
     params1 = std * T.randn(self.num_params1)
@@ -153,6 +156,10 @@ class PD_PGLearner(metaclass=ABCMeta):
 
       # Observe rewards and actions
       r1, r2, a1, a2, ipw = self.outcomes(params1, params2, self.current_state[0], self.current_state[1])
+      if np.random.random() < 0.05:
+        a1 = np.random.choice(2)
+      if np.random.random() < 0.05:
+        a2 = np.random.choice(2)
       if self.a_punish_1 is not None: # If decided to punish on the last turn, replace with punishment action
         a1 = self.a_punish_1
       if self.a_punish_2 is not None:
@@ -161,19 +168,23 @@ class PD_PGLearner(metaclass=ABCMeta):
       self.reward_history.append((r1, r2))
       self.action_history.append((a1, a2))
       self.ipw_history.append(ipw)
-      self.opponent_reward_estimates_1[self.current_state[0], a2, a1] += (r2 -
-                                                                          self.opponent_reward_estimates_1[self.current_state[0],
-                                                                                                           a2, a1]) / (i + 1)
-      self.opponent_reward_estimates_2[self.current_state[1], a1, a2] += (r1 -
-                                                                          self.opponent_reward_estimates_2[self.current_state[1],
-                                                                                                           a1, a2]) / (i + 1)
+      self.opponent_reward_estimate_counts_1[a2, a1] += 1
+      self.opponent_reward_estimate_counts_2[a1, a2] += 1
+      self.opponent_reward_estimates_1[a2, a1] += (r2 - self.opponent_reward_estimates_1[a2, a1]) / \
+        self.opponent_reward_estimate_counts_1[a2, a1]
+      self.opponent_reward_estimates_2[a1, a2] += (r1 - self.opponent_reward_estimates_2[a1, a2]) / \
+        self.opponent_reward_estimate_counts_2[a1, a2]
+      print(params1, params2)
       self.current_state = (a2, a1) # Agent i's state is agent -i's previous action
 
+
       # ToDo: make sure parameter -> action mapping is consistent!
-      probs1 = T.sigmoid(params1)
-      probs2 = T.sigmoid(params2)
-      self.pr_CC_log[i] = probs1[0*(1-a2) + a2*2]*probs2[0*(1-a1) + 2*a1]
-      self.pr_DD_log[i] = probs1[1*(1-a2) + a2*3]*probs2[1*(1-a1) + 3*a1]
+      probs1 = T.sigmoid(params1[(2*a2):(2*a2 + 2)]).detach().numpy()
+      probs2 = T.sigmoid(params2[(2*a1):(2*a1 + 2)]).detach().numpy()
+      probs1 /= np.sum(probs1)
+      probs2 /= np.sum(probs2)
+      self.pr_CC_log[i] = probs1[0]*probs2[0]
+      self.pr_DD_log[i] = probs1[1]*probs2[1]
 
       # Define bargaining value function estimator
       # V1, V2 = self.payoffs(params1, params2, ipw_history, reward_history, action_history, state_history)
@@ -182,8 +193,8 @@ class PD_PGLearner(metaclass=ABCMeta):
         V1_, V2_ = self.payoffs(p1, p2, self.ipw_history, self.reward_history, self.action_history, self.state_history)
         return (V1_ + V2_).requires_grad_()
 
-      self.payoffs1_log[i] = r1
-      self.payoffs2_log[i] = r2
+      self.payoffs1_log[i] = np.sum(np.multiply(np.outer(probs1, probs2), self.payoffs1))
+      self.payoffs2_log[i] = np.sum(np.multiply(np.outer(probs1, probs2), self.payoffs2))
       if n_print_every and i % n_print_every == 0:
         print(f"Epoch {i + 1} of {n_epochs}; payoffs:\t{V1:.2f}\t{V2:.2f};\tPr[CC]:\t{pCC:.2f};\tPr[DD]:\t{pDD:.2f}")
       # noinspection PyInterpreter
@@ -283,7 +294,7 @@ class IPD_PG(PD_PGLearner):
     value_estimate_1 = 0.
     value_estimate_2 = 0.
     is_normalizer = 0. # For stability
-    look_back = np.min((0, len(ipw_history) - 10))
+    look_back = np.max((0, len(ipw_history) - 10))
     for ipw, r, a, s in zip(ipw_history[look_back:], reward_history[look_back:], action_history[look_back:],
                             state_history[look_back:]):
       # Get prob of a under probs1, probs2
@@ -300,10 +311,10 @@ class IPD_PG(PD_PGLearner):
       value_estimate_1 += is_weight * r[0]
       value_estimate_2 += is_weight * r[1]
 
-    return value_estimate_1, value_estimate_2
+    return value_estimate_1 / is_normalizer, value_estimate_2 / is_normalizer
 
 
 if __name__ == "__main__":
   ipd = IPD_PG()
   ipd.learn(0.5, optim.gradient_ascent_minmax_reward, optim.gradient_ascent_minmax_reward, grad,
-            n_epochs=100)
+            n_epochs=2000)
