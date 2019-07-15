@@ -283,8 +283,13 @@ class PD_PGLearner(metaclass=ABCMeta):
         V1_, V2_ = self.payoffs(p1, p2, self.ipw_history, self.reward_history, self.action_history, self.state_history)
         return (V1_ + V2_).requires_grad_()
 
-      self.payoffs1_log[i] = np.sum(np.multiply(np.outer(probs1, probs2), self.payoffs1))
-      self.payoffs2_log[i] = np.sum(np.multiply(np.outer(probs1, probs2), self.payoffs2))
+      if not (player_1_exploitable_ or player_2_exploitable_):
+        self.payoffs1_log[i] = np.sum(np.multiply(np.outer(probs1, probs2), self.payoffs1))
+        self.payoffs2_log[i] = np.sum(np.multiply(np.outer(probs1, probs2), self.payoffs2))
+      else:
+        self.payoffs1_log[i] = self.payoffs1[a1, a2]
+        self.payoffs2_log[i] = self.payoffs2[a2, a1]
+
       if n_print_every and i % n_print_every == 0:
         print(f"Epoch {i + 1} of {n_epochs}; payoffs:\t{V1:.2f}\t{V2:.2f};\tPr[CC]:\t{pCC:.2f};\tPr[DD]:\t{pDD:.2f}")
       # noinspection PyInterpreter
