@@ -177,6 +177,64 @@ class PD_PGLearner(metaclass=ABCMeta):
 
     return update1, update2, a_punish_1, a_punish_2
 
+  def learn_multi_rep(self,
+                      label,
+                      n_rep,
+                      lr,
+                      updater1,
+                      updater2,
+                      bargaining_updater,
+                      lr_opponent=None,
+                      std=0.01,
+                      n_epochs=2000,
+                      n_print_every=None,
+                      init_params1=None,
+                      init_params2=None,
+                      plot_learning=True,
+                      suboptimality_tolerance=0.1,
+                      hypothesis_test=False,
+                      exploitability_policy=None, # Must be supplied if hypothesis_test=True
+                      **kwargs,  # these are forwarded to the parameters-to-outcomes function
+                      ):
+    pr_CC = []
+    pr_DD = []
+    payoffs1 = []
+    payoffs2 = []
+    for rep in range(n_rep):
+      results = self.learn(lr,
+                          updater1,
+                          updater2,
+                          bargaining_updater,
+                          lr_opponent=lr_opponent,
+                          std=std,
+                          n_epochs=n_epochs,
+                          n_print_every=n_print_every,
+                          init_params1=init_params1,
+                          init_params2=init_params2,
+                          plot_learning=False,
+                          suboptimality_tolerance=suboptimality_tolerance,
+                          hypothesis_test=hypothesis_test,
+                          exploitability_policy=exploitability_policy, # Must be supplied if hypothesis_test=True
+                          **kwargs  # these are forwarded to the parameters-to-outcomes function
+                          )
+      if plot_learning:
+        pr_CC.append(results['pr_CC'])
+        pr_DD.append(results['pr_DD'])
+        payoffs1.append(results['payoffs1'])
+        payoffs2.append(results['payoffs2'])
+
+    if plot_learning:
+      # Get average values over each replicate
+      self.pr_CC_log = np.array(pr_CC).mean(axis=0)
+      self.pr_DD_log = np.array(pr_DD).mean(axis=0)
+      self.payoffs1_log = np.array(payoffs1).mean(axis=0)
+      self.payoffs2_log = np.array(payoffs2).mean(axis=0)
+
+      # Plot
+      self.plot_last_learning(label)
+
+
+
   def learn(self,
             lr,
             updater1,
@@ -340,8 +398,10 @@ class PD_PGLearner(metaclass=ABCMeta):
     self.final_params = (params1, params2)
     if plot_learning:
       self.plot_last_learning()
+    return {'pr_CC':self.pr_CC_log, 'pr_DD': self.pr_DD_log, 'payoffs1': self.payoffs1_log,
+            'payoffs2': self.payoffs2_log}
 
-  def plot_last_learning(self):
+  def plot_last_learning(self, label):
     if self.pr_CC_log is not None:
       steps = np.arange(len(self.pr_CC_log))
       fig, axs = plt.subplots(nrows=2, ncols=1, sharex=True)
@@ -353,7 +413,10 @@ class PD_PGLearner(metaclass=ABCMeta):
       ax.plot(steps, self.payoffs1_log, label='payoffs player 1')
       ax.plot(steps, self.payoffs2_log, label='payoffs player 2')
       ax.legend()
-      plt.show()
+      if label is not None: # save figure if filename given
+        plt.savefig('{}.png'.format(label))
+      else:
+        plt.show()
     else:
       print("This learner has not learnt yet.")
 
@@ -414,12 +477,14 @@ if __name__ == "__main__":
   no_enforce_payoffs_1 = np.array([[0., -1.], [-1., -0.75]])
   no_enforce_payoffs_2 = np.array([[2., 2.], [2.5, 2.5]])
 
-  # ipd = IPD_PG(payoffs1=pd_payoffs1, payoffs2=pd_payoffs2)
-  # ipd.learn(0.5, optim.gradient_ascent_minmax_reward, optim.gradient_ascent_minmax_reward, grad,
-  #           n_epochs=2000)
+  ipd = IPD_PG(payoffs1=pd_payoffs1, payoffs2=pd_payoffs2)
+  ipd.learn_multi_rep('pd', 2, 0.5, optim.gradient_ascent_minmax_reward, optim.gradient_ascent_minmax_reward, grad,
+                      n_epochs=5000)
 
   no_enforce = IPD_PG(payoffs1=no_enforce_payoffs_1, payoffs2=no_enforce_payoffs_2)
-  # no_enforce.learn(0.5, optim.gradient_ascent_minmax_reward, optim.gradient_ascent_minmax_reward, grad,
-  #            n_epochs=100, hypothesis_test=True, exploitability_policy=optim.max_min_exploitability_policy)
-  no_enforce.learn(0.5, optim.gradient_ascent_minmax_reward, optim.gradient_ascent_minmax_reward, grad,
-                   n_epochs=1000)
+  no_enforce.learn_multi_rep('game-2-with-ht', 0.5, optim.gradient_ascent_minmax_reward,
+                             optim.gradient_ascent_minmax_reward, grad,
+                             n_epochs=5000, hypothesis_test=True,
+                             exploitability_policy=optim.max_min_exploitability_policy)
+  no_enforce.learn_multi_rep('game-2-without-ht', 0.5, optim.gradient_ascent_minmax_reward,
+                             optim.gradient_ascent_minmax_reward, grad, n_epochs=5000)
