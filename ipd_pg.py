@@ -241,7 +241,7 @@ class PD_PGLearner(metaclass=ABCMeta):
             updater2,
             bargaining_updater,
             lr_opponent=None,
-            std=0.01,
+            std=10,
             n_epochs=2000,
             n_print_every=None,
             init_params1=None,
@@ -267,14 +267,16 @@ class PD_PGLearner(metaclass=ABCMeta):
     self.current_state = (0, 0) # Start off both cooperating
     player_1_exploitable_ = player_2_exploitable_ = False
 
-    params1 = std * T.randn(self.num_params1)
+    # params1 = std * T.randn(self.num_params1)
+    params1 = T.tensor([10, -10, 10, -10]).float()
     if init_params1:
       assert len(init_params1) == self.num_params1, \
         "initial parameters for player 1 don't have correct length"
       params1 += T.tensor(init_params1).float()
     params1.requires_grad_()
 
-    params2 = std * T.randn(self.num_params2)
+    # params2 = std * T.randn(self.num_params2)
+    params2 = T.tensor([-10, 10, -10, 10]).float()
     if init_params2:
       assert len(init_params2) == self.num_params2, \
         "initial parameters for player 2 don't have correct length"
@@ -478,13 +480,13 @@ if __name__ == "__main__":
   no_enforce_payoffs_2 = np.array([[2., 2.], [2.5, 2.5]])
 
   ipd = IPD_PG(payoffs1=pd_payoffs1, payoffs2=pd_payoffs2)
-  # ipd.learn_multi_rep('pd', 20, 0.5, optim.gradient_ascent_minmax_reward, optim.gradient_ascent_minmax_reward, grad,
-  #                     n_epochs=5000)
+  ipd.learn_multi_rep(None, 1, 0.5, optim.gradient_ascent_minmax_reward, optim.gradient_ascent_minmax_reward, grad,
+                      n_epochs=100)
 
   no_enforce = IPD_PG(payoffs1=no_enforce_payoffs_1, payoffs2=no_enforce_payoffs_2)
   # no_enforce.learn_multi_rep('game-2-with-ht', 20, 0.5, optim.gradient_ascent_minmax_reward,
   #                            optim.gradient_ascent_minmax_reward, grad,
   #                            n_epochs=5000, hypothesis_test=True,
   #                            exploitability_policy=optim.max_min_exploitability_policy)
-  no_enforce.learn_multi_rep('game-2-without-ht', 20, 0.5, optim.gradient_ascent_minmax_reward,
-                             optim.gradient_ascent_minmax_reward, grad, n_epochs=5000)
+  # no_enforce.learn_multi_rep('game-2-without-ht', 20, 0.5, optim.gradient_ascent_minmax_reward,
+  #                            optim.gradient_ascent_minmax_reward, grad, n_epochs=5000)
