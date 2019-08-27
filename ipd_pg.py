@@ -478,13 +478,13 @@ if __name__ == "__main__":
   no_enforce_payoffs_2 = np.array([[2., 2.], [2.5, 2.5]])
 
   ipd = IPD_PG(payoffs1=pd_payoffs1, payoffs2=pd_payoffs2)
-  ipd.learn_multi_rep('pd', 20, 0.5, optim.gradient_ascent_minmax_reward, optim.gradient_ascent_minmax_reward, grad,
-                      n_epochs=5000)
+  # ipd.learn_multi_rep('pd', 20, 0.5, optim.gradient_ascent_minmax_reward, optim.gradient_ascent_minmax_reward, grad,
+  #                     n_epochs=5000)
 
   no_enforce = IPD_PG(payoffs1=no_enforce_payoffs_1, payoffs2=no_enforce_payoffs_2)
-  no_enforce.learn_multi_rep('game-2-with-ht', 20, 0.5, optim.gradient_ascent_minmax_reward,
-                             optim.gradient_ascent_minmax_reward, grad,
-                             n_epochs=5000, hypothesis_test=True,
-                             exploitability_policy=optim.max_min_exploitability_policy)
+  # no_enforce.learn_multi_rep('game-2-with-ht', 20, 0.5, optim.gradient_ascent_minmax_reward,
+  #                            optim.gradient_ascent_minmax_reward, grad,
+  #                            n_epochs=5000, hypothesis_test=True,
+  #                            exploitability_policy=optim.max_min_exploitability_policy)
   no_enforce.learn_multi_rep('game-2-without-ht', 20, 0.5, optim.gradient_ascent_minmax_reward,
                              optim.gradient_ascent_minmax_reward, grad, n_epochs=5000)
