@@ -13,11 +13,12 @@ import pdb
 
 def vanilla_gradient(V, params1, lr, params2=None):
   if params2 is None:
-    dVd1 = grad(V(params1, params1, retain_graph=True, create_graph=True))
+    dVd1 = grad(V(params1), params1, retain_graph=True, create_graph=True)
     return (dVd1 * lr).data
   else:
     dVd1, dVd2 = grad(V((params1, params2)), (params1, params2), retain_graph=True, create_graph=True)
     return (dVd1 * lr).data, (dVd2 * lr).data
+
 
 def constrained_minmax(V_opponent, params1, params2, lr, player):
   """

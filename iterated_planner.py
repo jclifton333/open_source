@@ -5,6 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch as T
 from torch.autograd import grad, set_detect_anomaly
+import optim
 from abc import ABCMeta, abstractmethod
 
 set_detect_anomaly(True)
@@ -100,21 +101,21 @@ class IteratedGamedLearner(metaclass=ABCMeta):
       update1, update2 = updater1(V_1, params1_, lr, params2=params2_)
     else:
       update1 = updater1(V_1, params1_, lr, params2=None)
-      update2 = updater2(V_2, params2_, lr, 2, params2=None)
+      update2 = updater2(V_2, params2_, lr, arams2=None)
 
     return update1, update2
 
   def learn(self,
-            lr,
-            updater1,
-            updater2,
+            label=0,
+            lr=0.1,
+            updater1=optim.vanilla_gradient,
+            updater2=optim.vanilla_gradient,
             std=0.01,
             n_epochs=2000,
             n_print_every=None,
             init_params1=None,
             init_params2=None,
-            plot_learning=True,
-            **kwargs,  # these are forwarded to the parameters-to-outcomes function
+            plot_learning=True
             ):
 
     # Initialize data for learning
@@ -201,9 +202,9 @@ class IteratedGamedLearner(metaclass=ABCMeta):
         params1,
         params2,
         updater1,
-        updater2,
         V_1,
-        V_2
+        updater2=updater2,
+        V_2=V_2
       )
 
       # Do updates
@@ -212,7 +213,7 @@ class IteratedGamedLearner(metaclass=ABCMeta):
 
     self.final_params = (params1, params2)
     if plot_learning:
-      self.plot_last_learning()
+      self.plot_last_learning(label)
     return {'pr_CC':self.pr_CC_log, 'pr_DD': self.pr_DD_log, 'payoffs1': self.payoffs1_log,
             'payoffs2': self.payoffs2_log}
 
@@ -325,10 +326,10 @@ class IteratedGamedLearner(metaclass=ABCMeta):
 
 
 class MaxMinSolver(IteratedGamedLearner):
-  def __init__(self,
-               payoffs1=np.array([[-1., -3.], [0., -2.]]),
-               **kwargs):
+  def __init__(self, payoffs1=np.array([[-1., -3.], [0., -2.]])):
     super().__init__(joint_optimization=False, payoffs1=payoffs1)
+    self.num_params1 = 4
+    self.num_params2 = 4
 
   def payoffs(self, params1, params2, ipw_history, reward_history, action_history, state_history):
     return self.value_estimates(params1, params2, ipw_history, reward_history, action_history, state_history)
@@ -339,17 +340,26 @@ class NashBargainingSolver(IteratedGamedLearner):
                disagreement_value_1,
                disagreement_value_2,
                payoffs1=np.array([[-1., -3.], [0., -2.]]),
-               payoffs2=np.array([[-1., -3.], [0., -2.]]),
-               **kwargs):
+               payoffs2=np.array([[-1., -3.], [0., -2.]])):
     super().__init__(joint_optimization=True, payoffs1=payoffs1, payoffs2=payoffs2)
     self.disagreement_value_1 = disagreement_value_1
     self.disagreement_value_2 = disagreement_value_2
+    self.num_params1 = 4
+    self.num_params2 = 4
 
   def payoffs(self, params1, params2, ipw_history, reward_history, action_history, state_history):
     value_estimate_1_, value_estimate_2_ = \
       self.value_estimates(params1, params2, ipw_history, reward_history, action_history, state_history)
-    return np.log(value_estimate_1_ - self.disagreement_value_1) + \
-        np.log(value_estimate_2_ - self.disagreement_value_2)
+    return T.log(value_estimate_1_ - self.disagreement_value_1) + \
+        T.log(value_estimate_2_ - self.disagreement_value_2)
 
+
+if __name__ == "__main__":
+  disagreement_value_1 = -5.0
+  disagreement_value_2 = -5.0
+  # nbs = NashBargainingSolver(disagreement_value_1, disagreement_value_2)
+  # nbs.learn(n_epochs=5000)
+  mm = MaxMinSolver()
+  mm.learn(n_epochs=1000)
 
 
