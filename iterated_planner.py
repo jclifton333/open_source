@@ -89,18 +89,18 @@ class IteratedGamedLearner(metaclass=ABCMeta):
 
   @staticmethod
   def gradient_ascent(lr,
-                      params1,
-                      params2,
+                      params1_,
+                      params2_,
                       updater1,
                       V_1,
                       updater2=None,
                       V_2=None):
 
     if V_2 is None:  # If only one value function is passed, assume joint optimization
-      update1, update2 = updater1(V_1, params1, params2, lr, 1)
+      update1, update2 = updater1(V_1, params1_, lr, params2=params2_)
     else:
-      update1 = updater1(V_1, params1, params2, lr, 1)
-      update2 = updater2(V_2, params1, params2, lr, 2)
+      update1 = updater1(V_1, params1_, lr, params2=None)
+      update2 = updater2(V_2, params2_, lr, 2, params2=None)
 
     return update1, update2
 
