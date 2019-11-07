@@ -34,11 +34,15 @@ def defection_test(player_1_reward_history_, player_2_reward_history_, player_1_
   return player_1_defecting, player_2_defecting
 
 
-# ToDo: implement Solver parent class to eliminate redundancies in the classes below
-class MaxMinSolver(metaclass=ABCMeta):
-  def __init__(self,
-               payoffs1=np.array([[-1., -3.], [0., -2.]]),
-               **kwargs):
+class IteratedGamedLearner(metaclass=ABCMeta):
+  def __init__(self, joint_optimization=True,
+               payoffs1=np.array([[-1., -3.], [0., -2.]]), payoffs2=np.array([[-1., -3.], [0., -2.]])):
+    """
+    Default payoffs are PD.
+
+    :param payoffs1:
+    :param payoffs2:
+    """
     # overwrite these in child classes; **kwargs can be used here
     self.num_params1 = -1
     self.num_params2 = -1
@@ -46,15 +50,26 @@ class MaxMinSolver(metaclass=ABCMeta):
     self.pr_CC_log = None
     self.pr_DD_log = None
     self.payoffs1 = payoffs1
-    self.payoffs2 = -payoffs1
+    if payoffs2 is None: # If no payoffs2 provided, assume zero-sum.
+      self.payoffs2 = -payoffs1
+      self.zero_sum = True
+    else:
+      self.payoffs2 = payoffs2
+      self.zero_sum = False
     self.payoffs1_log = None
     self.payoffs2_log = None
     self.reward_history = None
     self.action_history = None
     self.state_history = None
     self.ipw_history = None
+    self.joint_optimization = joint_optimization
 
-  def actions_from_params(self, params1, params2, s1, s2):
+  @abstractmethod
+  def payoffs(self, params1, params2, ipw_history, reward_history, action_history, state_history):
+    pass
+
+  @staticmethod
+  def actions_from_params(params1, params2, s1, s2):
     # Draw actions from policies
     probs1 = T.sigmoid(params1[(2*s1):(2*s1+2)]).detach().numpy()
     probs2 = T.sigmoid(params2[(2*s2):(2*s2+2)]).detach().numpy()
@@ -71,27 +86,28 @@ class MaxMinSolver(metaclass=ABCMeta):
     return a1, a2, ipw
 
   def outcomes(self, a1, a2):
+    # ToDo: Assuming variance = 0.1!
     # Draw rewards
     mu1 = self.payoffs1[a1, a2]
+    mu2 = self.payoffs2[a1, a2]  # ToDo: check that this indexing is right
     r1 = np.random.normal(mu1, 0.1)
-    r2 = -r1
-
+    r2 = np.random.normal(mu2, 0.1)
     return r1, r2
 
-  def gradient_ascent(self,
-                      lr,
-                      lr_opponent,
+  @staticmethod
+  def gradient_ascent(lr,
                       params1,
                       params2,
                       updater1,
-                      updater2,
-                      V):
-    if lr_opponent is None:
-      lr_opponent = lr
+                      V_1,
+                      updater2=None,
+                      V_2=None):
 
-    # Get actual updates
-    update1 = updater1(V, params1, params2, lr, 1)
-    update2 = updater2(V, params1, params2, lr, 2)
+    if V_2 is None:  # If only one value function is passed, assume joint optimization
+      update1, update2 = updater1(V_1, params1, params2, lr, 1)
+    else:
+      update1 = updater1(V_1, params1, params2, lr, 1)
+      update2 = updater2(V_2, params1, params2, lr, 2)
 
     return update1, update2
 
@@ -99,7 +115,6 @@ class MaxMinSolver(metaclass=ABCMeta):
             lr,
             updater1,
             updater2,
-            lr_opponent=None,
             std=0.01,
             n_epochs=2000,
             n_print_every=None,
@@ -108,6 +123,8 @@ class MaxMinSolver(metaclass=ABCMeta):
             plot_learning=True,
             **kwargs,  # these are forwarded to the parameters-to-outcomes function
             ):
+
+    # Initialize data for learning
     self.pr_CC_log = np.empty(n_epochs)
     self.pr_DD_log = np.empty(n_epochs)
     self.payoffs1_log = np.empty(n_epochs)
@@ -136,12 +153,12 @@ class MaxMinSolver(metaclass=ABCMeta):
       params2 += T.tensor(init_params2).float()
     params2.requires_grad_()
 
+    # Learn
     for i in range(n_epochs):
       print(i)
 
+      # Take action and observe rewards
       a1, a2, ipw = self.actions_from_params(params1, params2, self.current_state[0], self.current_state[1])
-
-      # Observe rewards
       r1, r2 = self.outcomes(a1, a2)
 
       # Update histories
@@ -164,12 +181,19 @@ class MaxMinSolver(metaclass=ABCMeta):
       self.pr_CC_log[i] = probs1[0]*probs2[0]
       self.pr_DD_log[i] = probs1[1]*probs2[1]
 
-      # Define bargaining value function estimator
-      # V1, V2 = self.payoffs(params1, params2, ipw_history, reward_history, action_history, state_history)
-      def V(p1p2):
+      # Get gradient(s) of value function(s)
+      def V_1(p1p2):
         p1, p2 = p1p2
-        V_ = self.payoffs(p1, p2, self.ipw_history, self.reward_history, self.action_history, self.state_history)
-        return V_.requires_grad_()
+        V_1_ = self.payoffs(p1, p2, self.ipw_history, self.reward_history, self.action_history, self.state_history)
+        return V_1_.requires_grad_()
+
+      if not self.joint_optimization:
+        def V_2(p1p2):
+          p1, p2 = p1p2
+          V_2_ = self.payoffs(p2, p1, self.ipw_history, self.reward_history, self.action_history, self.state_history)
+          return V_2_.requires_grad_()
+      else:
+        V_2 = None
 
       self.payoffs1_log[i] = self.payoffs1[a1, a2]
       self.payoffs2_log[i] = self.payoffs2[a2, a1]
@@ -181,12 +205,12 @@ class MaxMinSolver(metaclass=ABCMeta):
       # Get each agent's update
       update1, update2 = self.gradient_ascent(
         lr,
-        lr_opponent,
         params1,
         params2,
         updater1,
         updater2,
-        V,
+        V_1,
+        V_2
       )
 
       # Do updates
@@ -199,77 +223,6 @@ class MaxMinSolver(metaclass=ABCMeta):
     return {'pr_CC':self.pr_CC_log, 'pr_DD': self.pr_DD_log, 'payoffs1': self.payoffs1_log,
             'payoffs2': self.payoffs2_log}
 
-
-class NashBargainingSolver(metaclass=ABCMeta):
-  def __init__(self,
-               disagreement_value_1,
-               disagreement_value_2,
-               payoffs1=np.array([[-1., -3.], [0., -2.]]),
-               payoffs2=np.array([[-1., -3.], [0., -2.]]),
-               **kwargs):
-    # overwrite these in child classes; **kwargs can be used here
-    self.num_params1 = -1
-    self.num_params2 = -1
-    # generate these when learning
-    self.pr_CC_log = None
-    self.pr_DD_log = None
-    self.payoffs1 = payoffs1
-    self.payoffs2 = payoffs2
-    self.payoffs1_log = None
-    self.payoffs2_log = None
-    self.reward_history = None
-    self.action_history = None
-    self.state_history = None
-    self.ipw_history = None
-    self.disagreement_value_1 = disagreement_value_1
-    self.disagreement_value_2 = disagreement_value_2
-
-  @abstractmethod
-  def payoffs(self, params1, params2, ipw_history, reward_history, action_history, state_history):
-    pass
-
-  def actions_from_params(self, params1, params2, s1, s2):
-    # Draw actions from policies
-    probs1 = T.sigmoid(params1[(2*s1):(2*s1+2)]).detach().numpy()
-    probs2 = T.sigmoid(params2[(2*s2):(2*s2+2)]).detach().numpy()
-    probs1 /= np.sum(probs1)
-    probs2 /= np.sum(probs2)
-    a1 = np.random.choice(range(2), p=probs1)
-    a2 = np.random.choice(range(2), p=probs2)
-
-    # Get ipws
-    ipw_1 = 1. / probs1[a1]
-    ipw_2 = 1. / probs2[a2]
-    ipw = ipw_1 * ipw_2
-
-    return a1, a2, ipw
-
-  def outcomes(self, a1, a2):
-    # Draw rewards
-    mu1 = self.payoffs1[a1, a2]
-    mu2 = self.payoffs2[a2, a1]
-    r1 = np.random.normal(mu1, 0.1)
-    r2 = np.random.normal(mu2, 0.1)
-
-    return r1, r2
-
-  def gradient_ascent(self,
-                      lr,
-                      lr_opponent,
-                      params1,
-                      params2,
-                      updater1,
-                      updater2,
-                      V):
-    if lr_opponent is None:
-      lr_opponent = lr
-
-    # Get actual updates
-    update1 = updater1(V, params1, params2, lr, 1)
-    update2 = updater2(V, params1, params2, lr, 2)
-
-    return update1, update2
-
   def learn_multi_rep(self,
                       label,
                       n_rep,
@@ -277,16 +230,12 @@ class NashBargainingSolver(metaclass=ABCMeta):
                       updater1,
                       updater2,
                       bargaining_updater,
-                      lr_opponent=None,
                       std=0.01,
                       n_epochs=2000,
                       n_print_every=None,
                       init_params1=None,
                       init_params2=None,
                       plot_learning=True,
-                      suboptimality_tolerance=0.1,
-                      hypothesis_test=False,
-                      exploitability_policy=None, # Must be supplied if hypothesis_test=True
                       **kwargs,  # these are forwarded to the parameters-to-outcomes function
                       ):
     pr_CC = []
@@ -295,20 +244,16 @@ class NashBargainingSolver(metaclass=ABCMeta):
     payoffs2 = []
     for rep in range(n_rep):
       results = self.learn(lr,
-                          updater1,
-                          updater2,
-                          bargaining_updater,
-                          lr_opponent=lr_opponent,
-                          std=std,
-                          n_epochs=n_epochs,
-                          n_print_every=n_print_every,
-                          init_params1=init_params1,
-                          init_params2=init_params2,
-                          plot_learning=False,
-                          suboptimality_tolerance=suboptimality_tolerance,
-                          hypothesis_test=hypothesis_test,
-                          exploitability_policy=exploitability_policy, # Must be supplied if hypothesis_test=True
-                          **kwargs  # these are forwarded to the parameters-to-outcomes function
+                           updater1,
+                           updater2,
+                           bargaining_updater,
+                           std=std,
+                           n_epochs=n_epochs,
+                           n_print_every=n_print_every,
+                           init_params1=init_params1,
+                           init_params2=init_params2,
+                           plot_learning=False,
+                           **kwargs  # these are forwarded to the parameters-to-outcomes function
                           )
       if plot_learning:
         pr_CC.append(results['pr_CC'])
@@ -325,139 +270,6 @@ class NashBargainingSolver(metaclass=ABCMeta):
 
       # Plot
       self.plot_last_learning(label)
-
-  def learn(self,
-            lr,
-            updater1,
-            updater2,
-            bargaining_updater,
-            lr_opponent=None,
-            std=0.01,
-            n_epochs=2000,
-            n_print_every=None,
-            init_params1=None,
-            init_params2=None,
-            plot_learning=True,
-            suboptimality_tolerance=0.1,
-            test_for_defection=True,
-            exploitability_policy=None, # Must be supplied if hypothesis_test=True
-            **kwargs,  # these are forwarded to the parameters-to-outcomes function
-            ):
-    self.pr_CC_log = np.empty(n_epochs)
-    self.pr_DD_log = np.empty(n_epochs)
-    self.payoffs1_log = np.empty(n_epochs)
-    self.payoffs2_log = np.empty(n_epochs)
-    self.reward_history = []
-    self.action_history = []
-    self.state_history = []
-    self.ipw_history = []
-    self.opponent_reward_estimates_1 = np.zeros((2, 2))  # Agent 2 reward at (a_2, a_1)
-    self.opponent_reward_estimates_2 = np.zeros((2, 2))  # Agent 1 reward at (a_1, a_2)
-    self.opponent_reward_estimate_counts_1 = np.zeros((2, 2))
-    self.opponent_reward_estimate_counts_2 = np.zeros((2, 2))
-    self.current_state = (0, 0) # Start off both cooperating
-    player_1_exploitable_ = player_2_exploitable_ = False
-
-    params1 = std * T.randn(self.num_params1)
-    if init_params1:
-      assert len(init_params1) == self.num_params1, \
-        "initial parameters for player 1 don't have correct length"
-      params1 += T.tensor(init_params1).float()
-    params1.requires_grad_()
-
-    params2 = std * T.randn(self.num_params2)
-    if init_params2:
-      assert len(init_params2) == self.num_params2, \
-        "initial parameters for player 2 don't have correct length"
-      params2 += T.tensor(init_params2).float()
-    params2.requires_grad_()
-
-    for i in range(n_epochs):
-      print(i)
-
-      # Get actions from current policy
-      if not (player_1_exploitable_ or player_2_exploitable_):  # If neither is exploitable, follow param policies
-        a1, a2, ipw = self.actions_from_params(params1, params2, self.current_state[0], self.current_state[1])
-      else:
-        a1, a2, ipw = exploitability_policy(self.opponent_reward_estimates_2, self.opponent_reward_estimates_1,
-                                            player_1_exploitable_, player_2_exploitable_)
-
-      # Override actions with exploration or punishment
-      if np.random.random() < 0.05:
-        a1 = np.random.choice(2)
-      if np.random.random() < 0.05:
-        a2 = np.random.choice(2)
-      if self.a_punish_1 is not None: # If decided to punish on the last turn, replace with punishment action
-        a1 = self.a_punish_1
-      if self.a_punish_2 is not None:
-        a2 = self.a_punish_2
-
-      # Observe rewards
-      r1, r2 = self.outcomes(a1, a2)
-
-      # Update histories
-      self.state_history.append(self.current_state)
-      self.reward_history.append((r1, r2))
-      self.action_history.append((a1, a2))
-      self.ipw_history.append(ipw)
-      self.opponent_reward_estimate_counts_1[a2, a1] += 1
-      self.opponent_reward_estimate_counts_2[a1, a2] += 1
-      self.opponent_reward_estimates_1[a2, a1] += (r2 - self.opponent_reward_estimates_1[a2, a1]) / \
-        self.opponent_reward_estimate_counts_1[a2, a1]
-      self.opponent_reward_estimates_2[a1, a2] += (r1 - self.opponent_reward_estimates_2[a1, a2]) / \
-        self.opponent_reward_estimate_counts_2[a1, a2]
-      self.current_state = (a2, a1) # Agent i's state is agent -i's previous action
-
-      # Check for defections
-      if test_for_defection:
-        player_1_defecting_, player_2_defecting = \
-          defection_test(self.reward_history_1, self.self.reward_history_2,
-          self.cooperative_reward_mean_1, self.cooperative_reward_mean_2)
-
-      print(self.opponent_reward_estimates_2, self.opponent_reward_estimates_1)
-      print(player_1_defecting_, player_2_defecting_)
-
-      probs1 = T.sigmoid(params1[(2*a2):(2*a2 + 2)]).detach().numpy()
-      probs2 = T.sigmoid(params2[(2*a1):(2*a1 + 2)]).detach().numpy()
-      probs1 /= np.sum(probs1)
-      probs2 /= np.sum(probs2)
-      self.pr_CC_log[i] = probs1[0]*probs2[0]
-      self.pr_DD_log[i] = probs1[1]*probs2[1]
-
-      # Define bargaining value function estimator
-      # V1, V2 = self.payoffs(params1, params2, ipw_history, reward_history, action_history, state_history)
-      def V(p1p2):
-        p1, p2 = p1p2
-        V_ = self.payoffs(p1, p2, self.ipw_history, self.reward_history, self.action_history, self.state_history)
-        return V_.requires_grad_()
-
-      self.payoffs1_log[i] = self.payoffs1[a1, a2]
-      self.payoffs2_log[i] = self.payoffs2[a2, a1]
-
-      if n_print_every and i % n_print_every == 0:
-        print(f"Epoch {i + 1} of {n_epochs}; payoffs:\t{V1:.2f}\t{V2:.2f};\tPr[CC]:\t{pCC:.2f};\tPr[DD]:\t{pDD:.2f}")
-      # noinspection PyInterpreter
-
-      # Get each agent's update
-      update1, update2 = self.gradient_ascent(
-        lr,
-        lr_opponent,
-        params1,
-        params2,
-        updater1,
-        updater2,
-        V,
-      )
-
-      # Do updates
-      params1.data += update1
-      params2.data += update2
-
-    self.final_params = (params1, params2)
-    if plot_learning:
-      self.plot_last_learning()
-    return {'pr_CC':self.pr_CC_log, 'pr_DD': self.pr_DD_log, 'payoffs1': self.payoffs1_log,
-            'payoffs2': self.payoffs2_log}
 
   def plot_last_learning(self, label):
     if self.pr_CC_log is not None:
@@ -477,6 +289,25 @@ class NashBargainingSolver(metaclass=ABCMeta):
         plt.show()
     else:
       print("This learner has not learnt yet.")
+
+
+class MaxMinSolver(IteratedGamedLearner):
+  def __init__(self,
+               payoffs1=np.array([[-1., -3.], [0., -2.]]),
+               **kwargs):
+    super().__init__(joint_optimization=False, payoffs1=payoffs1)
+
+
+class NashBargainingSolver(metaclass=ABCMeta):
+  def __init__(self,
+               disagreement_value_1,
+               disagreement_value_2,
+               payoffs1=np.array([[-1., -3.], [0., -2.]]),
+               payoffs2=np.array([[-1., -3.], [0., -2.]]),
+               **kwargs):
+    super().__init__(joint_optimization=True, payoffs1=payoffs1, payoffs2=payoffs2)
+    self.disagreement_value_1 = disagreement_value_1
+    self.disagreement_value_2 = disagreement_value_2
 
   def payoffs(self, params1, params2, ipw_history, reward_history, action_history, state_history):
     """
