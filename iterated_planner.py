@@ -5,14 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch as T
 from torch.autograd import grad, set_detect_anomaly
-from random import uniform
-from functools import partial
-from scipy.special import expit
 from abc import ABCMeta, abstractmethod
-import pdb
-import optim
-import random
-import sys
 
 set_detect_anomaly(True)
 
@@ -290,26 +283,8 @@ class IteratedGamedLearner(metaclass=ABCMeta):
     else:
       print("This learner has not learnt yet.")
 
-
-class MaxMinSolver(IteratedGamedLearner):
-  def __init__(self,
-               payoffs1=np.array([[-1., -3.], [0., -2.]]),
-               **kwargs):
-    super().__init__(joint_optimization=False, payoffs1=payoffs1)
-
-
-class NashBargainingSolver(metaclass=ABCMeta):
-  def __init__(self,
-               disagreement_value_1,
-               disagreement_value_2,
-               payoffs1=np.array([[-1., -3.], [0., -2.]]),
-               payoffs2=np.array([[-1., -3.], [0., -2.]]),
-               **kwargs):
-    super().__init__(joint_optimization=True, payoffs1=payoffs1, payoffs2=payoffs2)
-    self.disagreement_value_1 = disagreement_value_1
-    self.disagreement_value_2 = disagreement_value_2
-
-  def payoffs(self, params1, params2, ipw_history, reward_history, action_history, state_history):
+  @staticmethod
+  def value_estimates(params1, params2, ipw_history, reward_history, action_history, state_history):
     """
 
     :param ipw1:
@@ -349,52 +324,32 @@ class NashBargainingSolver(metaclass=ABCMeta):
     return value_estimate_1 / is_normalizer, value_estimate_2 / is_normalizer
 
 
-class IteratedNashBargaining(NashBargainingSolver):
-  """
-  NBS for iterated game with policy gradient instead of exact solution.
-  """
-
-  def __init__(self, payoffs1, payoffs2):
-    super().__init__(payoffs1=payoffs1, payoffs2=payoffs2)
-    self.num_params1 = 4
-    self.num_params2 = 4
+class MaxMinSolver(IteratedGamedLearner):
+  def __init__(self,
+               payoffs1=np.array([[-1., -3.], [0., -2.]]),
+               **kwargs):
+    super().__init__(joint_optimization=False, payoffs1=payoffs1)
 
   def payoffs(self, params1, params2, ipw_history, reward_history, action_history, state_history):
-    """
+    return self.value_estimates(params1, params2, ipw_history, reward_history, action_history, state_history)
 
-    :param ipw1:
-    :param ipw2:
-    :param reward_history:
-    :param action_history:
-    :param state_history:
-    :return:
-    """
-    if type(params1) is np.ndarray or type(params2) is np.ndarray:
-      params1 = T.from_numpy(params1).float()
-      params2 = T.from_numpy(params2).float()
 
-    probs1 = T.sigmoid(params1)
-    probs2 = T.sigmoid(params2)
+class NashBargainingSolver(IteratedGamedLearner):
+  def __init__(self,
+               disagreement_value_1,
+               disagreement_value_2,
+               payoffs1=np.array([[-1., -3.], [0., -2.]]),
+               payoffs2=np.array([[-1., -3.], [0., -2.]]),
+               **kwargs):
+    super().__init__(joint_optimization=True, payoffs1=payoffs1, payoffs2=payoffs2)
+    self.disagreement_value_1 = disagreement_value_1
+    self.disagreement_value_2 = disagreement_value_2
 
-    value_estimate_1 = 0.
-    value_estimate_2 = 0.
-    is_normalizer = 0. # For stability
-    look_back = np.max((0, len(ipw_history) - 10))
-    for ipw, r, a, s in zip(ipw_history[look_back:], reward_history[look_back:], action_history[look_back:],
-                            state_history[look_back:]):
-      # Get prob of a under probs1, probs2
-      # ToDo: assuming params are in order [CC, CD, DC, DD]; check this!
-      s1, s2 = s
-      a1, a2 = a
-      prob_a1 = probs1[(s1 + a1)*(1-s1) + (s1 + a1 + 1)*s1]
-      prob_a2 = probs2[(s2 + a2)*(1-s2) + (s2 + a2 + 1)*s2]
-      prob_a = prob_a1 * prob_a2
+  def payoffs(self, params1, params2, ipw_history, reward_history, action_history, state_history):
+    value_estimate_1_, value_estimate_2_ = \
+      self.value_estimates(params1, params2, ipw_history, reward_history, action_history, state_history)
+    return np.log(value_estimate_1_ - self.disagreement_value_1) + \
+        np.log(value_estimate_2_ - self.disagreement_value_2)
 
-      # Update value estimate
-      is_weight = prob_a / ipw
-      is_normalizer += is_weight
-      value_estimate_1 += r[0] * is_weight
-      value_estimate_2 += r[1] * is_weight
 
-    return np.log(value_estimate_1 / is_normalizer - self.disagreement_value_1) + \
-           np.log(value_estimate_2 / is_normalizer - self.disagreement_value_2)
+
