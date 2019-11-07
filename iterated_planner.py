@@ -83,7 +83,7 @@ class IteratedGamedLearner(metaclass=ABCMeta):
     # ToDo: Assuming variance = 0.1!
     # Draw rewards
     mu1 = self.payoffs1[a1, a2]
-    mu2 = self.payoffs2[a1, a2]  # ToDo: check that this indexing is right
+    mu2 = self.payoffs2[a2, a1]
     r1 = np.random.normal(mu1, 0.1)
     r2 = np.random.normal(mu2, 0.1)
     return r1, r2
@@ -98,10 +98,10 @@ class IteratedGamedLearner(metaclass=ABCMeta):
                       V_2=None):
 
     if V_2 is None:  # If only one value function is passed, assume joint optimization
-      update1, update2 = updater1(V_1, params1_, lr, params2=params2_)
+      update1, update2 = updater1(V_1, params1_, params2_)
     else:
-      update1 = updater1(V_1, params1_, lr, params2=None)
-      update2 = updater2(V_2, params2_, lr, arams2=None)
+      update1, _ = updater1(V_1, params1_, params2_, lr)
+      _, update2 = updater2(V_2, params2_, params2_, lr)
 
     return update1, update2
 
@@ -176,18 +176,23 @@ class IteratedGamedLearner(metaclass=ABCMeta):
       self.pr_DD_log[i] = probs1[1]*probs2[1]
 
       # Get gradient(s) of value function(s)
-      def V_1(p1p2):
-        p1, p2 = p1p2
-        V_1_ = self.payoffs(p1, p2, self.ipw_history, self.reward_history, self.action_history, self.state_history)
-        return V_1_.requires_grad_()
+      # ToDo: this can probably be improved
+      if self.joint_optimization:
+        def V_1(p1p2):
+          p1, p2 = p1p2
+          V_1_ = self.payoffs(p1, p2, self.ipw_history, self.reward_history, self.action_history, self.state_history)
+          return V_1_.requires_grad_()
+        V_2 = None
+      else:
+        def V_1(p1p2):
+          p1, p2 = p1p2
+          V_1_, _ = self.payoffs(p1, p2, self.ipw_history, self.reward_history, self.action_history, self.state_history)
+          return V_1_.requires_grad_()
 
-      if not self.joint_optimization:
         def V_2(p1p2):
           p1, p2 = p1p2
-          V_2_ = self.payoffs(p2, p1, self.ipw_history, self.reward_history, self.action_history, self.state_history)
+          _, V_2_ = self.payoffs(p1, p2, self.ipw_history, self.reward_history, self.action_history, self.state_history)
           return V_2_.requires_grad_()
-      else:
-        V_2 = None
 
       self.payoffs1_log[i] = self.payoffs1[a1, a2]
       self.payoffs2_log[i] = self.payoffs2[a2, a1]
@@ -358,8 +363,6 @@ if __name__ == "__main__":
   disagreement_value_1 = -5.0
   disagreement_value_2 = -5.0
   # nbs = NashBargainingSolver(disagreement_value_1, disagreement_value_2)
-  # nbs.learn(n_epochs=5000)
+  # nbs.learn(n_epochs=2500)
   mm = MaxMinSolver()
-  mm.learn(n_epochs=1000)
-
-
+  mm.learn(n_epochs=5000)
