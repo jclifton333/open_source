@@ -79,6 +79,7 @@ class IteratedGameLearner(metaclass=ABCMeta):
     r2 = np.random.normal(mu2, 0.1)
     return r1, r2
 
+  @abstractmethod
   def learn(self,
             label=0,
             lr=0.1,
@@ -91,6 +92,9 @@ class IteratedGameLearner(metaclass=ABCMeta):
             init_params2=None,
             plot_learning=True
             ):
+    pass
+
+  def initialize_observation_histories(self):
     # ToDo: many of these params may not be used
     # Initialize data for learning
     self.pr_CC_log = np.empty(n_epochs)
@@ -167,9 +171,7 @@ class IteratedGamePGLearner(IteratedGameLearner):
             init_params2=None,
             plot_learning=True
             ):
-    super(IteratedGamePGLearner, self).learn(label=label, lr=lr, updater1=updater1, updater2=updater2, std=std,
-                                             n_epochs=n_epochs, n_print_every=n_print_every, init_params1=init_params1,
-                                             init_params2=init_params2, plot_learning=plot_learning)
+    self.initialize_observation_histories()
     params1 = std * T.randn(self.num_params1)
     if init_params1:
       assert len(init_params1) == self.num_params1, \
@@ -408,16 +410,15 @@ class SwitchingPolicyLearner(IteratedGameLearner):
   def learn(self,
             label=0,
             lr=0.1,
+            updater1=optim.vanilla_gradient,
+            updater2=optim.vanilla_gradient,
             std=0.01,
-            n_epochs_per_candidate_cutoff=100,
+            n_epochs=2000,
             n_print_every=None,
             init_params1=None,
             init_params2=None,
             plot_learning=True
             ):
-    super(SwitchingPolicyLearner, self).learn(label=label, lr=lr, updater1=updater1, updater2=updater2, std=std,
-                                              n_print_every=n_print_every, init_params1=init_params1,
-                                              init_params2=init_params2, plot_learning=plot_learning)
     number_of_punish_periods = 10
 
     # Learn by naive search over grid of cutoffs
@@ -428,11 +429,12 @@ class SwitchingPolicyLearner(IteratedGameLearner):
     for cutoff in cutoff_grid:
       for i in range(n_epochs_per_candidate_cutoff):
         # ToDo: need to reset histories at each epoch
+        self.initialize_observation_histories()
         player2_has_defected = False  # Track whether a defection has been detected
         time_since_defection = 0
         value_at_cutoff = 0.
         print(i)
-        for j in range(self.time_horizon):
+        for _ in range(self.time_horizon):
           if player2_has_defected:
             # ToDo: assuming player 2 continues to follow default policy after defection is detected.
             params1 = self.punishment_params1
