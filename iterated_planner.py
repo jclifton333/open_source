@@ -94,8 +94,7 @@ class IteratedGameLearner(metaclass=ABCMeta):
             ):
     pass
 
-  def initialize_observation_histories(self):
-    # ToDo: many of these params may not be used
+  def initialize_observation_histories(self, n_epochs):
     # Initialize data for learning
     self.pr_CC_log = np.empty(n_epochs)
     self.pr_DD_log = np.empty(n_epochs)
@@ -247,7 +246,7 @@ class IteratedGamePGLearner(IteratedGameLearner):
     if plot_learning:
       self.plot_last_learning(label)
     return {'pr_CC':self.pr_CC_log, 'pr_DD': self.pr_DD_log, 'payoffs1': self.payoffs1_log,
-            'payoffs2': self.payoffs2_log}
+            'payoffs2': self.payoffs2_log, 'param1': self.final_params[0], 'param2': self.final_params[1]}
 
   def learn_multi_rep(self,
                       label,
@@ -408,6 +407,7 @@ class SwitchingPolicyLearner(IteratedGameLearner):
     self.time_horizon = time_horizon
 
   def learn(self,
+            n_epochs_per_candidate_cutoff=1,
             label=0,
             lr=0.1,
             updater1=optim.vanilla_gradient,
@@ -425,14 +425,14 @@ class SwitchingPolicyLearner(IteratedGameLearner):
     cutoff_grid = np.linspace(0.05, 0.5, 20)
     best_cutoff = None
     # ToDo: value being optimized should be an argument, since we need to optimize both players' rewards
-    best_value = None
+    best_value = -float('inf')
     for cutoff in cutoff_grid:
+      value_at_cutoff = 0.
       for i in range(n_epochs_per_candidate_cutoff):
         # ToDo: need to reset histories at each epoch
-        self.initialize_observation_histories()
+        self.initialize_observation_histories(n_epochs_per_candidate_cutoff)
         player2_has_defected = False  # Track whether a defection has been detected
         time_since_defection = 0
-        value_at_cutoff = 0.
         print(i)
         for _ in range(self.time_horizon):
           if player2_has_defected:
@@ -448,11 +448,11 @@ class SwitchingPolicyLearner(IteratedGameLearner):
           r1, r2 = self.outcomes(a1, a2)
 
           # Update histories
-          self.update_histories(r1, r2, a1, a2)
+          self.update_histories(r1, r2, a1, a2, None)
           probs1 = expit(params1[(2*a2):(2*a2 + 2)])
           probs2 = expit(params2[(2*a1):(2*a1 + 2)])
-          probs1 /= np.sum(probs1)
-          probs2 /= np.sum(probs2)
+          probs1 /= T.sum(probs1)
+          probs2 /= T.sum(probs2)
           self.pr_CC_log[i] = probs1[0]*probs2[0]
           self.pr_DD_log[i] = probs1[1]*probs2[1]
 
@@ -467,16 +467,55 @@ class SwitchingPolicyLearner(IteratedGameLearner):
             time_since_defection = 0
           elif player2_has_defected and (time_since_defection != number_of_punish_periods):
             time_since_defection += 1
-
-        if n_print_every and i % n_print_every == 0:
-          print(f"Epoch {i + 1} of {int(n_epochs_per_candidate_cutoff*len(cutoff_grid))}; payoffs:\t{V1:.2f}\t{V2:.2f};\tPr[CC]:\t{pCC:.2f};\tPr[DD]:\t{pDD:.2f}")
-        # noinspection PyInterpreter
         value_at_cutoff += np.mean(self.payoffs1_log)
-        if value_at_cutoff > best_value:
-          best_value = value_at_cutoff
-          best_cutoff = cutoff
+
+        # if n_print_every and i % n_print_every == 0:
+        #   print(f"Epoch {i + 1} of {int(n_epochs_per_candidate_cutoff*len(cutoff_grid))}; payoffs:\t{V1:.2f}\t{V2:.2f};\tPr[CC]:\t{pCC:.2f};\tPr[DD]:\t{pDD:.2f}")
+        # # noinspection PyInterpreter
+      if value_at_cutoff > best_value:
+        best_value = value_at_cutoff
+        best_cutoff = cutoff
 
     return best_cutoff
+
+def learn_switching_policies(payoffs_1, payoffs_2):
+  """
+  Learn Nash bargaining soln for minimax disagreement, then policy for switching
+  to punishment.
+
+  :param payoffs_1:
+  :param payoffs_2:
+  :return:
+  """
+  LOOK_BACK_FOR_POLICY_EVALUATION = 10  # Amount of steps to average from end of learning to estimate policy value
+
+  # Get disagreement values
+  # ToDo: check order
+  max_min_1 = MaxMinSolver(payoffs_1)
+  max_min_1_res = max_min_1.learn(n_epochs=1000)
+  d1 = np.mean(max_min_1_res['payoffs1'][-LOOK_BACK_FOR_POLICY_EVALUATION:])
+  max_min_2 = MaxMinSolver(payoffs_2)
+  max_min_2_res = max_min_2.learn(n_epochs=1000)
+  d2 = np.mean(max_min_2_res['payoffs1'][-LOOK_BACK_FOR_POLICY_EVALUATION:])
+
+  # Get Nash bargaining solution
+  nbs = NashBargainingSolver(d1, d2, payoffs1=payoffs_1, payoffs2=payoffs_2)
+  nbs_res = nbs.learn(n_epochs=1000)
+
+  # Get switching policies
+  switcher1 = SwitchingPolicyLearner(np.mean(nbs_res['payoffs1'][-LOOK_BACK_FOR_POLICY_EVALUATION:]),
+                                     max_min_2['param2'],
+                                     nbs_res['param1'],
+                                     nbs_res['param2'])
+  cutoff1 = switcher1.learn()
+  switcher2 = SwitchingPolicyLearner(np.mean(nbs_res['payoffs2'][-LOOK_BACK_FOR_POLICY_EVALUATION:]),
+                                     max_min_1['param2'],
+                                     nbs_res['param2'],
+                                     nbs_res['param1'])
+  cutoff2 = swither2.learn()
+
+
+
 
 
 if __name__ == "__main__":
@@ -484,5 +523,11 @@ if __name__ == "__main__":
   disagreement_value_2 = -5.0
   # nbs = NashBargainingSolver(disagreement_value_1, disagreement_value_2)
   # nbs.learn(n_epochs=2500)
-  mm = MaxMinSolver()
-  mm.learn(n_epochs=5000)
+  # mm = MaxMinSolver()
+  # mm.learn(n_epochs=5000)
+  cooperative_payoffs1_ = 0.
+  punishment_params1_ = T.randn(4)
+  default_params1_ = T.randn(4)
+  default_params2_ = T.randn(4)
+  switcher = SwitchingPolicyLearner(cooperative_payoffs1_, punishment_params1_, default_params1_, default_params2_)
+  print(switcher.learn())
