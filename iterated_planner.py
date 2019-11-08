@@ -124,6 +124,49 @@ class IteratedGameLearner(metaclass=ABCMeta):
     self.opponent_reward_estimate_counts_2[a1, a2]
     self.current_state = (a2, a1)  # Agent i's state is agent -i's previous action
 
+  def roll_out_switching_policy(self, n_epochs, number_of_punish_periods, cutoff):
+    for i in range(n_epochs):
+      # ToDo: need to reset histories at each epoch
+      self.initialize_observation_histories(n_epochs_per_candidate_cutoff)
+      player2_has_defected = False  # Track whether a defection has been detected
+      time_since_defection = 0
+      print(i)
+      for _ in range(self.time_horizon):
+        if player2_has_defected:
+          # ToDo: assuming player 2 continues to follow default policy after defection is detected.
+          params1 = self.punishment_params1
+          params2 = self.default_params2
+        else:
+          params1 = self.default_params1
+          params2 = self.default_params2
+        # ToDo: actions_from_params currently only takes tensors
+        a1, a2, ipw = self.actions_from_params(self.punishment_params1, self.default_params2,
+                                               self.current_state[0], self.current_state[1])
+        r1, r2 = self.outcomes(a1, a2)
+
+        # Update histories
+        self.update_histories(r1, r2, a1, a2, None)
+        probs1 = expit(params1[(2 * a2):(2 * a2 + 2)])
+        probs2 = expit(params2[(2 * a1):(2 * a1 + 2)])
+        probs1 /= T.sum(probs1)
+        probs2 /= T.sum(probs2)
+        self.pr_CC_log[i] = probs1[0] * probs2[0]
+        self.pr_DD_log[i] = probs1[1] * probs2[1]
+
+        self.payoffs1_log[i] = self.payoffs1[a1, a2]
+        self.payoffs2_log[i] = self.payoffs2[a2, a1]
+
+        # Test for defections
+        # ToDo: introduce parameter for number of punish rounds
+        player2_has_defected = defection_test(self.payoffs1_log, self.cooperative_payoffs1, cutoff)
+        if player2_has_defected and (time_since_defection == number_of_punish_periods):
+          player2_has_defected = False
+          time_since_defection = 0
+        elif player2_has_defected and (time_since_defection != number_of_punish_periods):
+          time_since_defection += 1
+    return np.mean(self.payoffs1_log)
+
+
 
 class IteratedGamePGLearner(IteratedGameLearner):
   def __init__(self, joint_optimization=True,
@@ -427,48 +470,7 @@ class SwitchingPolicyLearner(IteratedGameLearner):
     # ToDo: value being optimized should be an argument, since we need to optimize both players' rewards
     best_value = -float('inf')
     for cutoff in cutoff_grid:
-      value_at_cutoff = 0.
-      for i in range(n_epochs_per_candidate_cutoff):
-        # ToDo: need to reset histories at each epoch
-        self.initialize_observation_histories(n_epochs_per_candidate_cutoff)
-        player2_has_defected = False  # Track whether a defection has been detected
-        time_since_defection = 0
-        print(i)
-        for _ in range(self.time_horizon):
-          if player2_has_defected:
-            # ToDo: assuming player 2 continues to follow default policy after defection is detected.
-            params1 = self.punishment_params1
-            params2 = self.default_params2
-          else:
-            params1 = self.default_params1
-            params2 = self.default_params2
-          # ToDo: actions_from_params currently only takes tensors
-          a1, a2, ipw = self.actions_from_params(self.punishment_params1, self.default_params2,
-                                                 self.current_state[0], self.current_state[1])
-          r1, r2 = self.outcomes(a1, a2)
-
-          # Update histories
-          self.update_histories(r1, r2, a1, a2, None)
-          probs1 = expit(params1[(2*a2):(2*a2 + 2)])
-          probs2 = expit(params2[(2*a1):(2*a1 + 2)])
-          probs1 /= T.sum(probs1)
-          probs2 /= T.sum(probs2)
-          self.pr_CC_log[i] = probs1[0]*probs2[0]
-          self.pr_DD_log[i] = probs1[1]*probs2[1]
-
-          self.payoffs1_log[i] = self.payoffs1[a1, a2]
-          self.payoffs2_log[i] = self.payoffs2[a2, a1]
-
-          # Test for defections
-          # ToDo: introduce parameter for number of punish rounds
-          player2_has_defected = defection_test(self.payoffs1_log, self.cooperative_payoffs1, cutoff)
-          if player2_has_defected and (time_since_defection == number_of_punish_periods):
-            player2_has_defected = False
-            time_since_defection = 0
-          elif player2_has_defected and (time_since_defection != number_of_punish_periods):
-            time_since_defection += 1
-        value_at_cutoff += np.mean(self.payoffs1_log)
-
+      value_at_cutoff = self.roll_out_switching_policy(n_epochs_per_candidate_cutoff, number_of_punish_periods, cutoff)
         # if n_print_every and i % n_print_every == 0:
         #   print(f"Epoch {i + 1} of {int(n_epochs_per_candidate_cutoff*len(cutoff_grid))}; payoffs:\t{V1:.2f}\t{V2:.2f};\tPr[CC]:\t{pCC:.2f};\tPr[DD]:\t{pDD:.2f}")
         # # noinspection PyInterpreter
@@ -513,9 +515,7 @@ def learn_switching_policies(payoffs_1, payoffs_2):
                                      nbs_res['param2'],
                                      nbs_res['param1'])
   cutoff2 = swither2.learn()
-
-
-
+  return
 
 
 if __name__ == "__main__":
