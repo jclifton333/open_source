@@ -11,6 +11,11 @@ import sys
 import pdb
 
 
+def vanilla_gradient(V, params1, params2, lr):
+  dVd1, dVd2 = grad(V((params1, params2)), (params1, params2), retain_graph=True, create_graph=True)
+  return (dVd1 * lr).data, (dVd2 * lr).data
+
+
 def constrained_minmax(V_opponent, params1, params2, lr, player):
   """
    Minmax update of params1 against params2, constrained to have norm less than lr.

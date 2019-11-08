@@ -258,13 +258,6 @@ class IPD_PG(PDLearner):
     return value_estimate_1, value_estimate_2
 
 
-
-
-
-
-
-
-
 if __name__ == "__main__":
   ipd = IPD()
   ipd.learn(10, optim.gradient_ascent_minmax, optim.gradient_ascent_minmax, grad)
