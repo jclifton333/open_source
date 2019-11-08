@@ -339,7 +339,7 @@ class PD_PGLearner(metaclass=ABCMeta):
       # Define bargaining value function estimator
       # V1, V2 = self.payoffs(params1, params2, ipw_history, reward_history, action_history, state_history)
       def V(p1p2):
-        p1, p2 = p1p2
+        p1, p2 = p1p
         V1_, V2_ = self.payoffs(p1, p2, self.ipw_history, self.reward_history, self.action_history, self.state_history)
         return (V1_ + V2_).requires_grad_()
 
