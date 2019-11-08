@@ -7,25 +7,24 @@ import torch as T
 from torch.autograd import grad, set_detect_anomaly
 import optim
 from abc import ABCMeta, abstractmethod
+from scipy.special import expit
+from scipy.stats import norm
 
 set_detect_anomaly(True)
 
 
-def defection_test(player_1_reward_history_, player_2_reward_history_, player_1_cooperative_reward_mean,
-                   player_2_cooperative_reward_mean, cutoff):
+def defection_test(player_1_reward_history_, player_1_cooperative_reward_mean, cutoff):
   """
 
   :param player_1_reward_history_: Player 1's observed rewards
-  :param player_2_reward_history_: Player 2's observed rewards
   :param player_1_cooperative_reward_mean: Expected value under cooperation for player 1
-  :param player_2_cooperative_reward_mean: Expected value under cooperation for player 1
+  :param cutoff:
   :return:
   """
-  player_2_defecting = (np.mean(player_1_reward_history_) - player_1_cooperative_reward_mean) / \
-                       np.std(player_1_reward_history_) < cutoff
-  player_1_defecting = (np.mean(player_2_reward_history_) - player_2_cooperative_reward_mean) / \
-                       np.std(player_2_reward_history_) < cutoff
-  return player_1_defecting, player_2_defecting
+  player_2_test_statistic = (np.mean(player_1_reward_history_) - player_1_cooperative_reward_mean) / \
+                             np.std(player_1_reward_history_ / len(player_1_reward_history_))
+  player_2_null_prob = norm.cdf(player_2_test_statistic)
+  return player_2_null_prob < cutoff
 
 
 class IteratedGameLearner(metaclass=ABCMeta):
@@ -108,7 +107,7 @@ class IteratedGameLearner(metaclass=ABCMeta):
     self.opponent_reward_estimate_counts_2 = np.zeros((2, 2))
     self.current_state = (0, 0) # Start off both cooperating
 
-  def update_histories(self, r1, r2, a1, a2):
+  def update_histories(self, r1, r2, a1, a2, ipw):
     # Update histories
     self.state_history.append(self.current_state)
     self.reward_history.append((r1, r2))
@@ -193,7 +192,7 @@ class IteratedGamePGLearner(IteratedGameLearner):
       a1, a2, ipw = self.actions_from_params(params1, params2, self.current_state[0], self.current_state[1])
       r1, r2 = self.outcomes(a1, a2)
 
-      self.update_histories(r1, r2, a1, a2)
+      self.update_histories(r1, r2, a1, a2, ipw)
       probs1 = T.sigmoid(params1[(2*a2):(2*a2 + 2)]).detach().numpy()
       probs2 = T.sigmoid(params2[(2*a1):(2*a1 + 2)]).detach().numpy()
       probs1 /= np.sum(probs1)
@@ -395,98 +394,87 @@ class SwitchingPolicyLearner(IteratedGameLearner):
                default_params1,
                default_params2,
                payoffs1=np.array([[-1., -3.], [0., -2.]]),
-               payoffs2=np.array([[-1., -3.], [0., -2.]])):
+               payoffs2=np.array([[-1., -3.], [0., -2.]]),
+               time_horizon=50):
 
     super().__init__(payoffs1=payoffs1, payoffs2=payoffs2)
     self.cooperative_payoffs1 = cooperative_payoffs1
     self.default_params1 = default_params1
     self.default_params2 = default_params2
     self.punishment_params1 = punishment_params1  # Parameters for punishment policy
+    # ToDo: note that other learning algs don't have time horizon; each epoch impliclty has time_horizon=1
+    self.time_horizon = time_horizon
 
   def learn(self,
             label=0,
             lr=0.1,
             std=0.01,
-            n_epochs=2000,
+            n_epochs_per_candidate_cutoff=100,
             n_print_every=None,
             init_params1=None,
             init_params2=None,
             plot_learning=True
             ):
     super(SwitchingPolicyLearner, self).learn(label=label, lr=lr, updater1=updater1, updater2=updater2, std=std,
-                                               n_epochs=n_epochs, n_print_every=n_print_every, init_params1=init_params1,
-                                               init_params2=init_params2, plot_learning=plot_learning)
+                                              n_print_every=n_print_every, init_params1=init_params1,
+                                              init_params2=init_params2, plot_learning=plot_learning)
+    number_of_punish_periods = 10
 
-    # Learn
-    for i in range(n_epochs):
-      print(i)
-      self.player2_has_defected = False
+    # Learn by naive search over grid of cutoffs
+    cutoff_grid = np.linspace(0.05, 0.5, 20)
+    best_cutoff = None
+    # ToDo: value being optimized should be an argument, since we need to optimize both players' rewards
+    best_value = None
+    for cutoff in cutoff_grid:
+      for i in range(n_epochs_per_candidate_cutoff):
+        # ToDo: need to reset histories at each epoch
+        player2_has_defected = False  # Track whether a defection has been detected
+        time_since_defection = 0
+        value_at_cutoff = 0.
+        print(i)
+        for j in range(self.time_horizon):
+          if player2_has_defected:
+            # ToDo: assuming player 2 continues to follow default policy after defection is detected.
+            params1 = self.punishment_params1
+            params2 = self.default_params2
+          else:
+            params1 = self.default_params1
+            params2 = self.default_params2
+          # ToDo: actions_from_params currently only takes tensors
+          a1, a2, ipw = self.actions_from_params(self.punishment_params1, self.default_params2,
+                                                 self.current_state[0], self.current_state[1])
+          r1, r2 = self.outcomes(a1, a2)
 
-      # Take action and observe rewards
-      if self.player2_has_defected:
-        # ToDo: assuming player 2 continues to follow default policy after defection is detected.
-        a1, a2, ipw = self.actions_from_params(self.punishment_params1, self.default_params2,
-                                               self.current_state[0], self.current_state[1])
-      else:
-        a1, a2, ipw = self.actions_from_params(self.default_params1, self.default_params2,
-                                               self.current_state[0], self.current_state[1])
-      r1, r2 = self.outcomes(a1, a2)
+          # Update histories
+          self.update_histories(r1, r2, a1, a2)
+          probs1 = expit(params1[(2*a2):(2*a2 + 2)])
+          probs2 = expit(params2[(2*a1):(2*a1 + 2)])
+          probs1 /= np.sum(probs1)
+          probs2 /= np.sum(probs2)
+          self.pr_CC_log[i] = probs1[0]*probs2[0]
+          self.pr_DD_log[i] = probs1[1]*probs2[1]
 
-      # Update histories
-      self.update_histories(r1, r2, a1, a2)
-      probs1 = T.sigmoid(params1[(2*a2):(2*a2 + 2)]).detach().numpy()
-      probs2 = T.sigmoid(params2[(2*a1):(2*a1 + 2)]).detach().numpy()
-      probs1 /= np.sum(probs1)
-      probs2 /= np.sum(probs2)
-      self.pr_CC_log[i] = probs1[0]*probs2[0]
-      self.pr_DD_log[i] = probs1[1]*probs2[1]
+          self.payoffs1_log[i] = self.payoffs1[a1, a2]
+          self.payoffs2_log[i] = self.payoffs2[a2, a1]
 
-      # Get gradient(s) of value function(s)
-      # ToDo: this can probably be improved
-      if self.joint_optimization:
-        def V_1(p1p2):
-          p1, p2 = p1p2
-          V_1_ = self.payoffs(p1, p2, self.ipw_history, self.reward_history, self.action_history, self.state_history)
-          return V_1_.requires_grad_()
-        V_2 = None
-      else:
-        def V_1(p1p2):
-          p1, p2 = p1p2
-          V_1_, _ = self.payoffs(p1, p2, self.ipw_history, self.reward_history, self.action_history, self.state_history)
-          return V_1_.requires_grad_()
+          # Test for defections
+          # ToDo: introduce parameter for number of punish rounds
+          player2_has_defected = defection_test(self.payoffs1_log, self.cooperative_payoffs1, cutoff)
+          if player2_has_defected and (time_since_defection == number_of_punish_periods):
+            player2_has_defected = False
+            time_since_defection = 0
+          elif player2_has_defected and (time_since_defection != number_of_punish_periods):
+            time_since_defection += 1
 
-        def V_2(p1p2):
-          p1, p2 = p1p2
-          _, V_2_ = self.payoffs(p1, p2, self.ipw_history, self.reward_history, self.action_history, self.state_history)
-          return V_2_.requires_grad_()
+        if n_print_every and i % n_print_every == 0:
+          print(f"Epoch {i + 1} of {int(n_epochs_per_candidate_cutoff*len(cutoff_grid))}; payoffs:\t{V1:.2f}\t{V2:.2f};\tPr[CC]:\t{pCC:.2f};\tPr[DD]:\t{pDD:.2f}")
+        # noinspection PyInterpreter
+        value_at_cutoff += np.mean(self.payoffs1_log)
+        if value_at_cutoff > best_value:
+          best_value = value_at_cutoff
+          best_cutoff = cutoff
 
-      self.payoffs1_log[i] = self.payoffs1[a1, a2]
-      self.payoffs2_log[i] = self.payoffs2[a2, a1]
-
-      if n_print_every and i % n_print_every == 0:
-        print(f"Epoch {i + 1} of {n_epochs}; payoffs:\t{V1:.2f}\t{V2:.2f};\tPr[CC]:\t{pCC:.2f};\tPr[DD]:\t{pDD:.2f}")
-      # noinspection PyInterpreter
-
-      # Get each agent's update
-      update1, update2 = self.gradient_ascent(
-        lr,
-        params1,
-        params2,
-        updater1,
-        V_1,
-        updater2=updater2,
-        V_2=V_2
-      )
-
-      # Do updates
-      params1.data += update1
-      params2.data += update2
-
-    self.final_params = (params1, params2)
-    if plot_learning:
-      self.plot_last_learning(label)
-    return {'pr_CC':self.pr_CC_log, 'pr_DD': self.pr_DD_log, 'payoffs1': self.payoffs1_log,
-            'payoffs2': self.payoffs2_log}
+    return best_cutoff
 
 
 if __name__ == "__main__":
