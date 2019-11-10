@@ -483,7 +483,7 @@ class SwitchingPolicyLearner(IteratedGameLearner):
     return best_cutoff
 
 
-def learn_switching_policies(payoffs_1, payoffs_2):
+def learn_switching_policies(payoffs_1, payoffs_2, n_max_min_epochs=1000, n_nbs_epochs=1000):
   """
   Learn Nash bargaining soln for minimax disagreement, then policy for switching
   to punishment.
@@ -495,19 +495,20 @@ def learn_switching_policies(payoffs_1, payoffs_2):
   LOOK_BACK_FOR_POLICY_EVALUATION = 10  # Amount of steps to average from end of learning to estimate policy value
 
   # Get disagreement values
-  # ToDo: check order
   max_min_1 = MaxMinSolver(payoffs_1)
-  max_min_1_res = max_min_1.learn(n_epochs=10)
+  max_min_1_res = max_min_1.learn(n_epochs=n_max_min_epochs)
   d1 = np.mean(max_min_1_res['payoffs1'][-LOOK_BACK_FOR_POLICY_EVALUATION:])
   max_min_2 = MaxMinSolver(payoffs_2)
-  max_min_2_res = max_min_2.learn(n_epochs=10)
+  max_min_2_res = max_min_2.learn(n_epochs=n_max_min_epochs)
   d2 = np.mean(max_min_2_res['payoffs1'][-LOOK_BACK_FOR_POLICY_EVALUATION:])
 
   # Get Nash bargaining solution
   nbs = NashBargainingSolver(d1, d2, payoffs1=payoffs_1, payoffs2=payoffs_2)
-  nbs_res = nbs.learn(n_epochs=10)
+  nbs_res = nbs.learn(n_epochs=n_nbs_epochs)
 
   # Get switching policies
+  # ToDo: here the switching policy learner is learning against the Nash bargaining policy, whereas it should
+  # ToDo: be learning against a defecting policy.
   switcher1 = SwitchingPolicyLearner(np.mean(nbs_res['payoffs1'][-LOOK_BACK_FOR_POLICY_EVALUATION:]),
                                      max_min_2_res['param2'],
                                      nbs_res['param1'],
