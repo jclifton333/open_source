@@ -9,6 +9,7 @@ import optim
 from abc import ABCMeta, abstractmethod
 from scipy.special import expit
 from scipy.stats import norm
+import pdb
 
 set_detect_anomaly(True)
 
@@ -125,9 +126,9 @@ class IteratedGameLearner(metaclass=ABCMeta):
     self.current_state = (a2, a1)  # Agent i's state is agent -i's previous action
 
   def roll_out_switching_policy(self, n_epochs, number_of_punish_periods, cutoff):
+    self.initialize_observation_histories(n_epochs)
     for i in range(n_epochs):
       # ToDo: need to reset histories at each epoch
-      self.initialize_observation_histories(n_epochs_per_candidate_cutoff)
       player2_has_defected = False  # Track whether a defection has been detected
       time_since_defection = 0
       print(i)
@@ -146,8 +147,8 @@ class IteratedGameLearner(metaclass=ABCMeta):
 
         # Update histories
         self.update_histories(r1, r2, a1, a2, None)
-        probs1 = expit(params1[(2 * a2):(2 * a2 + 2)])
-        probs2 = expit(params2[(2 * a1):(2 * a1 + 2)])
+        probs1 = T.sigmoid(params1[(2 * a2):(2 * a2 + 2)])
+        probs2 = T.sigmoid(params2[(2 * a1):(2 * a1 + 2)])
         probs1 /= T.sum(probs1)
         probs2 /= T.sum(probs2)
         self.pr_CC_log[i] = probs1[0] * probs2[0]
@@ -194,7 +195,7 @@ class IteratedGamePGLearner(IteratedGameLearner):
                       V_2=None):
 
     if V_2 is None:  # If only one value function is passed, assume joint optimization
-      update1, update2 = updater1(V_1, params1_, params2_)
+      update1, update2 = updater1(V_1, params1_, params2_, lr)
     else:
       update1, _ = updater1(V_1, params1_, params2_, lr)
       _, update2 = updater2(V_2, params2_, params2_, lr)
@@ -213,7 +214,7 @@ class IteratedGamePGLearner(IteratedGameLearner):
             init_params2=None,
             plot_learning=True
             ):
-    self.initialize_observation_histories()
+    self.initialize_observation_histories(n_epochs)
     params1 = std * T.randn(self.num_params1)
     if init_params1:
       assert len(init_params1) == self.num_params1, \
@@ -400,6 +401,7 @@ class IteratedGamePGLearner(IteratedGameLearner):
 
 
 class MaxMinSolver(IteratedGamePGLearner):
+  # ToDo: Using naive policy gradient!
   def __init__(self, payoffs1=np.array([[-1., -3.], [0., -2.]])):
     super().__init__(joint_optimization=False, payoffs1=payoffs1)
     self.num_params1 = 4
@@ -480,6 +482,7 @@ class SwitchingPolicyLearner(IteratedGameLearner):
 
     return best_cutoff
 
+
 def learn_switching_policies(payoffs_1, payoffs_2):
   """
   Learn Nash bargaining soln for minimax disagreement, then policy for switching
@@ -494,40 +497,31 @@ def learn_switching_policies(payoffs_1, payoffs_2):
   # Get disagreement values
   # ToDo: check order
   max_min_1 = MaxMinSolver(payoffs_1)
-  max_min_1_res = max_min_1.learn(n_epochs=1000)
+  max_min_1_res = max_min_1.learn(n_epochs=10)
   d1 = np.mean(max_min_1_res['payoffs1'][-LOOK_BACK_FOR_POLICY_EVALUATION:])
   max_min_2 = MaxMinSolver(payoffs_2)
-  max_min_2_res = max_min_2.learn(n_epochs=1000)
+  max_min_2_res = max_min_2.learn(n_epochs=10)
   d2 = np.mean(max_min_2_res['payoffs1'][-LOOK_BACK_FOR_POLICY_EVALUATION:])
 
   # Get Nash bargaining solution
   nbs = NashBargainingSolver(d1, d2, payoffs1=payoffs_1, payoffs2=payoffs_2)
-  nbs_res = nbs.learn(n_epochs=1000)
+  nbs_res = nbs.learn(n_epochs=10)
 
   # Get switching policies
   switcher1 = SwitchingPolicyLearner(np.mean(nbs_res['payoffs1'][-LOOK_BACK_FOR_POLICY_EVALUATION:]),
-                                     max_min_2['param2'],
+                                     max_min_2_res['param2'],
                                      nbs_res['param1'],
                                      nbs_res['param2'])
   cutoff1 = switcher1.learn()
   switcher2 = SwitchingPolicyLearner(np.mean(nbs_res['payoffs2'][-LOOK_BACK_FOR_POLICY_EVALUATION:]),
-                                     max_min_1['param2'],
+                                     max_min_1_res['param2'],
                                      nbs_res['param2'],
                                      nbs_res['param1'])
-  cutoff2 = swither2.learn()
-  return
+  cutoff2 = switcher2.learn()
+  return cutoff1, cutoff2
 
 
 if __name__ == "__main__":
-  disagreement_value_1 = -5.0
-  disagreement_value_2 = -5.0
-  # nbs = NashBargainingSolver(disagreement_value_1, disagreement_value_2)
-  # nbs.learn(n_epochs=2500)
-  # mm = MaxMinSolver()
-  # mm.learn(n_epochs=5000)
-  cooperative_payoffs1_ = 0.
-  punishment_params1_ = T.randn(4)
-  default_params1_ = T.randn(4)
-  default_params2_ = T.randn(4)
-  switcher = SwitchingPolicyLearner(cooperative_payoffs1_, punishment_params1_, default_params1_, default_params2_)
-  print(switcher.learn())
+  pd_payoffs = np.array([[-1., -3.], [0., -2.]])
+  print(learn_switching_policies(pd_payoffs, pd_payoffs))
+
