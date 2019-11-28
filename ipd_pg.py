@@ -358,10 +358,10 @@ class PD_PGLearner(metaclass=ABCMeta):
 
       # Define opponent reward functions for punishment policy
       def R_opponent_1(a2_, a1_):
-        return self.opponent_reward_estimates_1[a2, a2_, a1_]
+        return self.opponent_reward_estimates_1[a2_, a1_]
 
       def R_opponent_2(a1_, a2_):
-        return self.opponent_reward_estimates_2[a1, a1_, a2_]
+        return self.opponent_reward_estimates_2[a1_, a2_]
 
       # Get each agent's update
       update1, update2, self.a_punish_1, self.a_punish_2 = self.gradient_ascent(
@@ -486,7 +486,7 @@ if __name__ == "__main__":
 
   ipd = IPD_PG(payoffs1=stag_payoffs1, payoffs2=stag_payoffs2)
   ipd.learn_multi_rep('stag-against-naive', 20, 0.5, optim.gradient_ascent_minmax_reward, optim.naive_gradient_ascent,
-                      grad, n_epochs=200)
+                      grad, n_epochs=2000)
 
   # no_enforce = IPD_PG(payoffs1=no_enforce_payoffs_1, payoffs2=no_enforce_payoffs_2)
   # no_enforce.learn_multi_rep('game-2-with-ht', 20, 0.5, optim.gradient_ascent_minmax_reward,
