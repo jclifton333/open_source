@@ -99,7 +99,7 @@ def max_min_exploitability_policy(R_player_1, R_player_2, player_1_exploitable, 
   return a1, a2, ipw
 
 
-def gradient_ascent_minmax_reward(V, params1, params2, lr, player, defect, R_opponent):
+def gradient_ascent_minmax_reward(V, V2, params1, params2, lr, player, defect, R_opponent):
   """
   Take the minmax action with respect to the opponent's estimated reward if defect.
 
@@ -128,4 +128,26 @@ def gradient_ascent_minmax_reward(V, params1, params2, lr, player, defect, R_opp
 
   return update, a_punish
 
+
+def naive_gradient_ascent(V, V2, params1, params2, lr, player, defect, R_opponent):
+  """
+  Take the minmax action with respect to the opponent's estimated reward if defect.
+
+  :param V:
+  :param R_opponent:
+  :param params1:
+  :param params2:
+  :param lr:
+  :param player:
+  :return:
+  """
+  # Get update
+  dVd1, dVd2 = grad(V2((params1, params2)), (params1, params2), retain_graph=True, create_graph=True)
+  if player == 1:
+    update = (dVd1 * lr).data
+  else:
+    update = (dVd2 * lr).data
+
+  a_punish = None
+  return update, a_punish
 

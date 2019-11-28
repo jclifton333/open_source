@@ -58,14 +58,13 @@ def gradient_info_at_p(p, payoffs_1, payoffs_2):
 
 
 if __name__ == "__main__":
-  stag_payoffs_1 = np.array([2, -1, 1, 1])
-  stag_payoffs_2 = np.array([2, 1, -1, 1])
+  stag_payoffs_1 = np.array([2, -5, 1, 1])
+  stag_payoffs_2 = np.array([2, 1, -5, 1])
   pd_payoffs_1 = np.array([1, -1, 2, -3])
   pd_payoffs_2 = np.array([1, 2, -1, -3])
   chicken_payoffs_1 = np.array([0, -1, 1, -5])
   chicken_payoffs_2 = np.array([0, 1, -1, -5])
   dummy_payoffs_1 = np.array([1, -1, 1, -1])
   dummy_payoffs_2 = np.array([-1, 1, -1, 1])
-  gradient_info_at_p([10, 10, -10, -10], chicken_payoffs_1, chicken_payoffs_2)
-  gradient_info_at_p([0, 0, 0, 0], dummy_payoffs_1, dummy_payoffs_2)
+  gradient_info_at_p([0, 0, 0, 0], stag_payoffs_1, stag_payoffs_2)
 

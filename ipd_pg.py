@@ -166,6 +166,7 @@ class PD_PGLearner(metaclass=ABCMeta):
                       defect1,
                       defect2,
                       V,
+                      V2,
                       R_opponent_1,
                       R_opponent_2):
     if lr_opponent is None:
@@ -173,8 +174,8 @@ class PD_PGLearner(metaclass=ABCMeta):
 
     # Get actual updates
     # Currently assuming punishment policy of the form minmax Reward_estimator
-    update1, a_punish_1 = updater1(V, params1, params2, lr, 1, defect2, R_opponent_1)
-    update2, a_punish_2 = updater2(V, params1, params2, lr, 2, defect1, R_opponent_2)
+    update1, a_punish_1 = updater1(V, V2, params1, params2, lr, 1, defect2, R_opponent_1)
+    update2, a_punish_2 = updater2(V, V2, params1, params2, lr, 2, defect1, R_opponent_2)
 
     return update1, update2, a_punish_1, a_punish_2
 
@@ -335,9 +336,14 @@ class PD_PGLearner(metaclass=ABCMeta):
       # Define bargaining value function estimator
       # V1, V2 = self.payoffs(params1, params2, ipw_history, reward_history, action_history, state_history)
       def V(p1p2):
-        p1, p2 = p1p
+        p1, p2 = p1p2
         V1_, V2_ = self.payoffs(p1, p2, self.ipw_history, self.reward_history, self.action_history, self.state_history)
         return (V1_ + V2_).requires_grad_()
+
+      def V2(p1p2):
+        p1, p2 = p1p2
+        _, V2_ = self.payoffs(p1, p2, self.ipw_history, self.reward_history, self.action_history, self.state_history)
+        return V2_.requires_grad_()
 
       if not (player_1_exploitable_ or player_2_exploitable_):
         self.payoffs1_log[i] = np.sum(np.multiply(np.outer(probs1, probs2), self.payoffs1))
@@ -368,6 +374,7 @@ class PD_PGLearner(metaclass=ABCMeta):
         self.defect1,
         self.defect2,
         V,
+        V2,
         R_opponent_1,
         R_opponent_2
       )
@@ -474,10 +481,12 @@ if __name__ == "__main__":
   pd_payoffs2 = np.array([[-1., -3.], [0., -2.]])
   no_enforce_payoffs_1 = np.array([[0., -1.], [-1., -0.75]])
   no_enforce_payoffs_2 = np.array([[2., 2.], [2.5, 2.5]])
+  stag_payoffs1 = np.array([[2, -1], [1, 1]])
+  stag_payoffs2 = np.array([[2, -1], [1, 1]])
 
-  ipd = IPD_PG(payoffs1=pd_payoffs1, payoffs2=pd_payoffs2)
-  ipd.learn_multi_rep('pd', 20, 0.5, optim.gradient_ascent_minmax_reward, optim.gradient_ascent_minmax_reward, grad,
-                      n_epochs=5000)
+  ipd = IPD_PG(payoffs1=stag_payoffs1, payoffs2=stag_payoffs2)
+  ipd.learn_multi_rep('stag-against-naive', 20, 0.5, optim.gradient_ascent_minmax_reward, optim.naive_gradient_ascent,
+                      grad, n_epochs=200)
 
   # no_enforce = IPD_PG(payoffs1=no_enforce_payoffs_1, payoffs2=no_enforce_payoffs_2)
   # no_enforce.learn_multi_rep('game-2-with-ht', 20, 0.5, optim.gradient_ascent_minmax_reward,
