@@ -99,7 +99,7 @@ def max_min_exploitability_policy(R_player_1, R_player_2, player_1_exploitable, 
   return a1, a2, ipw
 
 
-def gradient_ascent_minmax_reward(V, V2, params1, params2, lr, player, defect, R_opponent):
+def gradient_ascent_minmax_reward(V, V1, V2, params1, params2, lr, player, defect, R_opponent):
   """
   Take the minmax action with respect to the opponent's estimated reward if defect.
 
@@ -127,6 +127,19 @@ def gradient_ascent_minmax_reward(V, V2, params1, params2, lr, player, defect, R
     a_punish = None
 
   return update, a_punish
+
+
+def lola(V, V1, V2, params1, params2, lr, player, defect, R_opponent):
+  dV1d1, dV1d2 = grad(V1((params1, params2)), (params1, params2), create_graph=True)
+  dV2d1, dV2d2 = grad(V2((params1, params2)), (params1, params2), create_graph=True)
+  if player == 1:
+    dV2d21 = T.stack([grad(d, params1, retain_graph=True)[0] for d in dV2d2])
+    # ToDo: assuming learning rates are equal.
+    update = lr * lr * T.matmul(dV1d2, dV2d21).data
+  else:
+    dV1d12 = T.stack([grad(d, params2, retain_graph=True)[0] for d in dV1d1])
+    update = lr * lr * T.matmul(dV2d1, dV1d12).data
+  return update, None
 
 
 def naive_gradient_ascent(V, V2, params1, params2, lr, player, defect, R_opponent):

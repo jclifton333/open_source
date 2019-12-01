@@ -170,6 +170,7 @@ class PD_PGLearner(metaclass=ABCMeta):
                       defect1,
                       defect2,
                       V,
+                      V1,
                       V2,
                       R_opponent_1,
                       R_opponent_2):
@@ -178,8 +179,8 @@ class PD_PGLearner(metaclass=ABCMeta):
 
     # Get actual updates
     # Currently assuming punishment policy of the form minmax Reward_estimator
-    update1, a_punish_1 = updater1(V, V2, params1, params2, lr, 1, defect2, R_opponent_1)
-    update2, a_punish_2 = updater2(V, V2, params1, params2, lr, 2, defect1, R_opponent_2)
+    update1, a_punish_1 = updater1(V, V1, V2, params1, params2, lr, 1, defect2, R_opponent_1)
+    update2, a_punish_2 = updater2(V, V1, V2, params1, params2, lr, 2, defect1, R_opponent_2)
 
     return update1, update2, a_punish_1, a_punish_2
 
@@ -349,11 +350,10 @@ class PD_PGLearner(metaclass=ABCMeta):
         V1_, V2_ = self.payoffs(p1, p2, self.ipw_history, self.reward_history, self.action_history, self.state_history)
         return (V1_ + V2_).requires_grad_()
 
-      # ToDo: for debugging purposes
-      def val(alpha_):
-        param_ = T.tensor([logit(alpha_), logit(1-alpha_), logit(alpha_), logit(1-alpha_)])
-        return V((param_, param_))
-      pdb.set_trace()
+      def V1(p1p2):
+        p1, p2 = p1p2
+        V1_, _ = self.payoffs(p1, p2, self.ipw_history, self.reward_history, self.action_history, self.state_history)
+        return V1_.requires_grad_()
 
       def V2(p1p2):
         p1, p2 = p1p2
@@ -389,6 +389,7 @@ class PD_PGLearner(metaclass=ABCMeta):
         self.defect1,
         self.defect2,
         V,
+        V1,
         V2,
         R_opponent_1,
         R_opponent_2
@@ -469,7 +470,7 @@ class IPD_PG(PD_PGLearner):
     self.num_params2 = 4
 
   def payoffs(self, params1, params2, ipw_history, reward_history, action_history, state_history,
-              exact=True, gamma=0.99):
+              exact=False, gamma=0.99):
     """
 
     :param ipw1:
@@ -530,8 +531,8 @@ if __name__ == "__main__":
   stag_payoffs1 = np.array([[2., -3.], [0., 1.]])
   stag_payoffs2 = np.array([[2., -3.], [0., 1.]])
 
-  ipd = IPD_PG(payoffs1=stag_payoffs1, payoffs2=stag_payoffs2)
-  ipd.learn_multi_rep('stag', 10, 1., optim.gradient_ascent_minmax_reward,
+  ipd = IPD_PG(payoffs1=pd_payoffs1, payoffs2=pd_payoffs2)
+  ipd.learn_multi_rep('stag', 10, 10., optim.gradient_ascent_minmax_reward,
                       optim.gradient_ascent_minmax_reward, grad, n_epochs=100)
 
   # no_enforce = IPD_PG(payoffs1=no_enforce_payoffs_1, payoffs2=no_enforce_payoffs_2)
