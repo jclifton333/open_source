@@ -3,12 +3,14 @@ Iterated games with policy gradient learning.
 """
 
 import numpy as np
+import pandas as pd
+import seaborn as sns; sns.set()
 import matplotlib.pyplot as plt
 import torch as T
 from torch.autograd import grad, set_detect_anomaly
 from random import uniform
 from functools import partial
-from scipy.special import expit
+from scipy.special import expit, logit
 from abc import ABCMeta, abstractmethod
 import pdb
 import optim
@@ -99,6 +101,8 @@ class PD_PGLearner(metaclass=ABCMeta):
     self.pr_DD_log = None
     self.payoffs1 = payoffs1
     self.payoffs2 = payoffs2
+    self.payoffs1_cat = T.cat((T.tensor(payoffs1[0, :]), T.tensor(payoffs2[1, :])), 0).float()
+    self.payoffs2_cat = T.cat((T.tensor(payoffs2[:, 0]), T.tensor(payoffs2[:, 1])), 0).float()
     self.payoffs1_log = None
     self.payoffs2_log = None
     self.defect1 = False
@@ -202,6 +206,7 @@ class PD_PGLearner(metaclass=ABCMeta):
     pr_DD = []
     payoffs1 = []
     payoffs2 = []
+    step_list = []
     for rep in range(n_rep):
       results = self.learn(lr,
                           updater1,
@@ -222,18 +227,22 @@ class PD_PGLearner(metaclass=ABCMeta):
       if plot_learning:
         pr_CC.append(results['pr_CC'])
         pr_DD.append(results['pr_DD'])
+        step_list.append(np.arange(n_epochs))
         payoffs1.append(results['payoffs1'])
         payoffs2.append(results['payoffs2'])
 
     if plot_learning:
       # Get average values over each replicate
-      self.pr_CC_log = np.array(pr_CC).mean(axis=0)
-      self.pr_DD_log = np.array(pr_DD).mean(axis=0)
+      self.pr_CC_log = np.hstack(pr_CC)
+      self.pr_DD_log = np.hstack(pr_DD)
       self.payoffs1_log = np.array(payoffs1).mean(axis=0)
       self.payoffs2_log = np.array(payoffs2).mean(axis=0)
+      self.step_list = np.hstack(step_list)
+      self.payoffs1_log = np.hstack(payoffs1)
+      self.payoffs2_log = np.hstack(payoffs2)
 
       # Plot
-      self.plot_last_learning(label)
+      self.plot_last_learning(label, multi_rep=True)
 
   def learn(self,
             lr,
@@ -340,6 +349,12 @@ class PD_PGLearner(metaclass=ABCMeta):
         V1_, V2_ = self.payoffs(p1, p2, self.ipw_history, self.reward_history, self.action_history, self.state_history)
         return (V1_ + V2_).requires_grad_()
 
+      # ToDo: for debugging purposes
+      def val(alpha_):
+        param_ = T.tensor([logit(alpha_), logit(1-alpha_), logit(alpha_), logit(1-alpha_)])
+        return V((param_, param_))
+      pdb.set_trace()
+
       def V2(p1p2):
         p1, p2 = p1p2
         _, V2_ = self.payoffs(p1, p2, self.ipw_history, self.reward_history, self.action_history, self.state_history)
@@ -406,22 +421,39 @@ class PD_PGLearner(metaclass=ABCMeta):
     return {'pr_CC':self.pr_CC_log, 'pr_DD': self.pr_DD_log, 'payoffs1': self.payoffs1_log,
             'payoffs2': self.payoffs2_log}
 
-  def plot_last_learning(self, label):
+  def plot_last_learning(self, label, multi_rep):
     if self.pr_CC_log is not None:
-      steps = np.arange(len(self.pr_CC_log))
-      fig, axs = plt.subplots(nrows=2, ncols=1, sharex=True)
-      ax = axs[0]
-      ax.plot(steps, self.pr_CC_log, label='Prob[CC]')
-      ax.plot(steps, self.pr_DD_log, label='Prob[DD]')
-      ax.legend()
-      ax = axs[1]
-      ax.plot(steps, self.payoffs1_log, label='payoffs player 1')
-      ax.plot(steps, self.payoffs2_log, label='payoffs player 2')
-      ax.legend()
-      if label is not None: # save figure if filename given
-        plt.savefig('{}.png'.format(label))
-      else:
+      if multi_rep:
+        # Plot prob time series
+        fig, axs = plt.subplots(nrows=2)
+        probs_series_df = {'prob': np.hstack((self.pr_CC_log, self.pr_DD_log)),
+                           'steps': np.hstack((self.step_list, self.step_list)),
+                           'profile': np.hstack((['CC'] * len(self.step_list), ['DD'] * len(self.step_list))),
+                           'payoffs': np.hstack((self.payoffs1_log, self.payoffs2_log)),
+                           'player': np.hstack(
+                             (['player 1'] * len(self.step_list), ['player 2'] * len(self.step_list)))}
+        probs_series_df = pd.DataFrame(probs_series_df)
+        sns.lineplot(x='steps', y='prob', hue='profile', data=probs_series_df, ax=axs[0])
+
+        # Plot payoffs time series
+        sns.lineplot(x='steps', y='payoffs', hue='player', data=probs_series_df, ax=axs[1])
         plt.show()
+
+      else:
+        steps = np.arange(len(self.pr_CC_log))
+        fig, axs = plt.subplots(nrows=2, ncols=1, sharex=True)
+        ax = axs[0]
+        ax.plot(steps, self.pr_CC_log, label='Prob[CC]')
+        ax.plot(steps, self.pr_DD_log, label='Prob[DD]')
+        ax.legend()
+        ax = axs[1]
+        ax.plot(steps, self.payoffs1_log, label='payoffs player 1')
+        ax.plot(steps, self.payoffs2_log, label='payoffs player 2')
+        ax.legend()
+        if label is not None: # save figure if filename given
+          plt.savefig('{}.png'.format(label))
+        else:
+          plt.show()
     else:
       print("This learner has not learnt yet.")
 
@@ -436,7 +468,8 @@ class IPD_PG(PD_PGLearner):
     self.num_params1 = 4
     self.num_params2 = 4
 
-  def payoffs(self, params1, params2, ipw_history, reward_history, action_history, state_history):
+  def payoffs(self, params1, params2, ipw_history, reward_history, action_history, state_history,
+              exact=True, gamma=0.99):
     """
 
     :param ipw1:
@@ -453,27 +486,40 @@ class IPD_PG(PD_PGLearner):
     probs1 = T.sigmoid(params1)
     probs2 = T.sigmoid(params2)
 
-    value_estimate_1 = 0.
-    value_estimate_2 = 0.
-    is_normalizer = 0. # For stability
-    look_back = np.max((0, len(ipw_history) - 10))
-    for ipw, r, a, s in zip(ipw_history[look_back:], reward_history[look_back:], action_history[look_back:],
-                            state_history[look_back:]):
-      # Get prob of a under probs1, probs2
-      # ToDo: assuming params are in order [CC, CD, DC, DD]; check this!
-      s1, s2 = s
-      a1, a2 = a
-      prob_a1 = probs1[(s1 + a1)*(1-s1) + (s1 + a1 + 1)*s1]
-      prob_a2 = probs2[(s2 + a2)*(1-s2) + (s2 + a2 + 1)*s2]
-      prob_a = prob_a1 * prob_a2
+    if exact:
+      P = T.stack([
+        probs1 * probs2,
+        probs1 * (1 - probs2),
+        (1 - probs1) * probs2,
+        (1 - probs1) * (1 - probs2)
+      ])
+      s0 = T.tensor([1., 0., 0., 0.])
+      transition_matrix = P
+      infi_sum = T.inverse(T.eye(4) - gamma * transition_matrix)
+      avg_state = (1 - gamma) * T.matmul(infi_sum, s0)
+      return T.dot(avg_state, self.payoffs1_cat), T.dot(avg_state, self.payoffs2_cat)
+    else:
+      value_estimate_1 = 0.
+      value_estimate_2 = 0.
+      is_normalizer = 0. # For stability
+      look_back = np.max((0, len(ipw_history) - 10))
+      for ipw, r, a, s in zip(ipw_history[look_back:], reward_history[look_back:], action_history[look_back:],
+                              state_history[look_back:]):
+        # Get prob of a under probs1, probs2
+        # ToDo: assuming params are in order [CC, CD, DC, DD]; check this!
+        s1, s2 = s
+        a1, a2 = a
+        prob_a1 = probs1[(s1 + a1)*(1-s1) + (s1 + a1 + 1)*s1]
+        prob_a2 = probs2[(s2 + a2)*(1-s2) + (s2 + a2 + 1)*s2]
+        prob_a = prob_a1 * prob_a2
 
-      # Update value estimate
-      is_weight = prob_a / ipw
-      is_normalizer += is_weight
-      value_estimate_1 += is_weight * r[0]
-      value_estimate_2 += is_weight * r[1]
+        # Update value estimate
+        is_weight = prob_a / ipw
+        is_normalizer += is_weight
+        value_estimate_1 += is_weight * r[0]
+        value_estimate_2 += is_weight * r[1]
 
-    return value_estimate_1 / is_normalizer, value_estimate_2 / is_normalizer
+      return value_estimate_1 / is_normalizer, value_estimate_2 / is_normalizer
 
 
 if __name__ == "__main__":
@@ -481,12 +527,12 @@ if __name__ == "__main__":
   pd_payoffs2 = np.array([[-1., -3.], [0., -2.]])
   no_enforce_payoffs_1 = np.array([[0., -1.], [-1., -0.75]])
   no_enforce_payoffs_2 = np.array([[2., 2.], [2.5, 2.5]])
-  stag_payoffs1 = np.array([[2, -1], [1, 1]])
-  stag_payoffs2 = np.array([[2, -1], [1, 1]])
+  stag_payoffs1 = np.array([[2., -3.], [0., 1.]])
+  stag_payoffs2 = np.array([[2., -3.], [0., 1.]])
 
   ipd = IPD_PG(payoffs1=stag_payoffs1, payoffs2=stag_payoffs2)
-  ipd.learn_multi_rep('stag-against-naive', 20, 0.5, optim.gradient_ascent_minmax_reward, optim.naive_gradient_ascent,
-                      grad, n_epochs=2000)
+  ipd.learn_multi_rep('stag', 10, 1., optim.gradient_ascent_minmax_reward,
+                      optim.gradient_ascent_minmax_reward, grad, n_epochs=100)
 
   # no_enforce = IPD_PG(payoffs1=no_enforce_payoffs_1, payoffs2=no_enforce_payoffs_2)
   # no_enforce.learn_multi_rep('game-2-with-ht', 20, 0.5, optim.gradient_ascent_minmax_reward,

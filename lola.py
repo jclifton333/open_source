@@ -1,6 +1,8 @@
 import pdb
 import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
+import seaborn as sns; sns.set()
 import torch as T
 from torch.autograd import grad
 from random import uniform
@@ -274,25 +276,101 @@ class LolaLearner(metaclass=ABCMeta):
     self.final_params = (params1, params2)
     if plot_learning:
       self.plot_last_learning()
+    return {'pr_CC':self.pr_CC_log, 'pr_DD': self.pr_DD_log, 'payoffs1': self.payoffs1_log,
+            'payoffs2': self.payoffs2_log}
 
-  def plot_last_learning(self):
+  def learn_multi_rep(self,
+                      n_rep,
+                      lr,
+                      lola1=True,
+                      lola2=True,
+                      lr_opponent=None,
+                      std=0.01,
+                      n_epochs=2000,
+                      n_print_every=None,
+                      init_params1=None,
+                      init_params2=None,
+                      plot_learning=True,
+                      **kwargs,  # these are forwarded to the parameters-to-outcomes function
+                      ):
+        pr_CC = []
+        pr_DD = []
+        final_pr_CC = []
+        final_pr_DD = []
+        payoffs1 = []
+        payoffs2 = []
+        step_list = []
+        for rep in range(n_rep):
+          np.random.seed(rep)
+          results = self.learn(lr,
+                                lr_opponent=lr_opponent,
+                                lola1=lola1,
+                                lola2=lola2,
+                                include_second_lola_term1=False,
+                                include_second_lola_term2=False,
+                                std=std,
+                                n_epochs=n_epochs,
+                                n_print_every=n_print_every,
+                                init_params1=init_params1,
+                                init_params2=init_params2,
+                                plot_learning=False,
+                                *kwargs,  # these are forwarded to the parameters-to-outcomes function
+                               )
+
+          if plot_learning:
+            pr_CC.append(results['pr_CC'])
+            pr_DD.append(results['pr_DD'])
+            final_pr_CC.append(results['pr_CC'][-1])
+            final_pr_DD.append(results['pr_DD'][-1])
+            step_list.append(np.arange(n_epochs))
+            payoffs1.append(results['payoffs1'])
+            payoffs2.append(results['payoffs2'])
+
+        if plot_learning:
+          self.pr_CC_log = np.hstack(pr_CC)
+          self.pr_DD_log = np.hstack(pr_DD)
+          self.final_pr_CC = final_pr_CC
+          self.final_pr_DD = final_pr_DD
+          self.step_list = np.hstack(step_list)
+          self.payoffs1_log = np.hstack(payoffs1)
+          self.payoffs2_log = np.hstack(payoffs2)
+
+        # Plot
+        self.plot_last_learning(multi_rep=True)
+
+  def plot_last_learning(self, multi_rep):
     if self.pr_CC_log is not None:
-      steps = np.arange(len(self.pr_CC_log))
-      fig, axs = plt.subplots(nrows=2, ncols=1, sharex=True)
-      ax = axs[0]
-      ax.plot(steps, self.pr_CC_log, label='Prob[CC]')
-      ax.plot(steps, self.pr_DD_log, label='Prob[DD]')
-      ax.legend()
-      ax = axs[1]
-      ax.plot(steps, self.payoffs1_log, label='payoffs player 1')
-      ax.plot(steps, self.payoffs2_log, label='payoffs player 2')
-      ax.legend()
-      plt.show()
+      if multi_rep:
+        # Plot prob time series
+        fig, axs = plt.subplots(nrows=2)
+        probs_series_df = {'prob': np.hstack((self.pr_CC_log, self.pr_DD_log)),
+                           'steps': np.hstack((self.step_list, self.step_list)),
+                           'profile': np.hstack((['CC']*len(self.step_list), ['DD']*len(self.step_list))),
+                           'payoffs': np.hstack((self.payoffs1_log, self.payoffs2_log)),
+                           'player': np.hstack((['player 1']*len(self.step_list), ['player 2']*len(self.step_list)))}
+        probs_series_df = pd.DataFrame(probs_series_df)
+        sns.lineplot(x='steps', y='prob', hue='profile', data=probs_series_df, ax=axs[0])
+
+        # Plot payoffs time series
+        sns.lineplot(x='steps', y='payoffs', hue='player', data=probs_series_df, ax=axs[1])
+        plt.show()
+      else:
+        steps = np.arange(len(self.pr_CC_log))
+        fig, axs = plt.subplots(nrows=2, ncols=1, sharex=True)
+        ax = axs[0]
+        ax.plot(steps, self.pr_CC_log, label='Prob[CC]')
+        ax.plot(steps, self.pr_DD_log, label='Prob[DD]')
+        ax.legend()
+        ax = axs[1]
+        ax.plot(steps, self.payoffs1_log, label='payoffs player 1')
+        ax.plot(steps, self.payoffs2_log, label='payoffs player 2')
+        ax.legend()
+        plt.show()
     else:
       print("This learner has not learnt yet.")
 
 
-class IteratedSOS(SOSLearner):
+class IteratedLola(LolaLearner):
   def __init__(self, payoffs1=[-1., -3., 0., -2.], payoffs2=[-1., 0., -3., -2.]):
     super().__init__(payoffs1=payoffs1, payoffs2=payoffs2)
     self.num_params1 = 5
@@ -318,8 +396,5 @@ class IteratedSOS(SOSLearner):
 if __name__ == "__main__":
   stag_payoffs1 = [2., -3., 1., 1.]
   stag_payoffs2 = [2., 1., -3., 1.]
-  istag = IteratedSOS(payoffs1=stag_payoffs1, payoffs2=stag_payoffs2)
-  # istag.learn(10.)
-  ipd = IteratedSOS()
-  np.random.seed(4)
-  ipd.learn(1.)
+  istag = IteratedLola(payoffs1=stag_payoffs1, payoffs2=stag_payoffs2)
+  istag.learn_multi_rep(n_rep=20,lr=1.,n_epochs=200, std=1.0)
