@@ -133,11 +133,13 @@ class PD_PGLearner(metaclass=ABCMeta):
     a2 = np.random.choice(range(2), p=probs2)
 
     # Get ipws
-    ipw_1 = 1. / probs1[a1]
-    ipw_2 = 1. / probs2[a2]
+    p_a1 = probs1[a1]
+    p_a2 = probs2[a2]
+    ipw_1 = 1. / p_a1
+    ipw_2 = 1. / p_a2
     ipw = ipw_1 * ipw_2
 
-    return a1, a2, ipw
+    return a1, a2, p_a1, p_a2, ipw
 
   def outcomes(self, a1, a2):
     # Draw rewards
@@ -200,6 +202,7 @@ class PD_PGLearner(metaclass=ABCMeta):
                       plot_learning=True,
                       suboptimality_tolerance=0.1,
                       hypothesis_test=False,
+                      observable_seed=True,
                       exploitability_policy=None, # Must be supplied if hypothesis_test=True
                       **kwargs,  # these are forwarded to the parameters-to-outcomes function
                       ):
@@ -222,6 +225,7 @@ class PD_PGLearner(metaclass=ABCMeta):
                           plot_learning=False,
                           suboptimality_tolerance=suboptimality_tolerance,
                           hypothesis_test=hypothesis_test,
+                          observable_seed=observable_seed,
                           exploitability_policy=exploitability_policy, # Must be supplied if hypothesis_test=True
                           **kwargs  # these are forwarded to the parameters-to-outcomes function
                           )
@@ -259,7 +263,8 @@ class PD_PGLearner(metaclass=ABCMeta):
             plot_learning=True,
             suboptimality_tolerance=0.1,
             hypothesis_test=False,
-            exploitability_policy=None, # Must be supplied if hypothesis_test=True
+            exploitability_policy=None, # Must be supplied if hypothesis_test=True,
+            observable_seed=True,
             **kwargs,  # these are forwarded to the parameters-to-outcomes function
             ):
     self.pr_CC_log = np.empty(n_epochs)
@@ -268,6 +273,7 @@ class PD_PGLearner(metaclass=ABCMeta):
     self.payoffs2_log = np.empty(n_epochs)
     self.reward_history = []
     self.action_history = []
+    self.cooperative_likelihood_history = []
     self.state_history = []
     self.ipw_history = []
     self.opponent_reward_estimates_1 = np.zeros((2, 2))  # Agent 2 reward at (a_2, a_1)
@@ -296,7 +302,7 @@ class PD_PGLearner(metaclass=ABCMeta):
 
       # Get actions from current policy
       if not (player_1_exploitable_ or player_2_exploitable_):  # If neither is exploitable, follow param policies
-        a1, a2, ipw = self.actions_from_params(params1, params2, self.current_state[0], self.current_state[1])
+        a1, a2, p_a1, p_a2, ipw = self.actions_from_params(params1, params2, self.current_state[0], self.current_state[1])
       else:
         a1, a2, ipw = exploitability_policy(self.opponent_reward_estimates_2, self.opponent_reward_estimates_1,
                                             player_1_exploitable_, player_2_exploitable_)
@@ -397,20 +403,38 @@ class PD_PGLearner(metaclass=ABCMeta):
 
       # Compare to bargaining updates
       bargaining_update1, bargaining_update2 = self.bargaining_updates(lr, params1, params2, bargaining_updater, V,
-                                                                       suboptimality_tolerance)
-      V_bargaining = V((params1 + bargaining_update1, params2 + bargaining_update2)).detach().numpy()
+                                                                         suboptimality_tolerance)
+      if observable_seed:
+        V_bargaining = V((params1 + bargaining_update1, params2 + bargaining_update2)).detach().numpy()
 
-      if np.abs(V_bargaining - V((params1 + bargaining_update1, params2 + update2)).detach().numpy()) \
-              < suboptimality_tolerance:
-        self.defect2 = False
-      else:
-        self.defect2 = True
-      if np.abs(V_bargaining - V((params1 + update1, params2 + bargaining_update2)).detach().numpy()) \
-              < suboptimality_tolerance:
-        self.defect1 = False
-      else:
-        self.defect1 = True
-      print(self.defect1, self.defect2)
+        if np.abs(V_bargaining - V((params1 + bargaining_update1, params2 + update2)).detach().numpy()) \
+                < suboptimality_tolerance:
+          self.defect2 = False
+        else:
+          self.defect2 = True
+        if np.abs(V_bargaining - V((params1 + update1, params2 + bargaining_update2)).detach().numpy()) \
+                < suboptimality_tolerance:
+          self.defect1 = False
+        else:
+          self.defect1 = True
+        print(self.defect1, self.defect2)
+      else: # Infer whether you are being defected against
+        _, _, p_a1_barg, p_a2_barg, _ = self.actions_from_params(params1 + bargaining_update1,
+                                                                 params2 + bargaining_update2,
+                                                                 self.current_state[0],
+                                                                 self.current_state[1])
+        self.cooperative_likelihood_history.append([p_a1_barg, p_a2_barg])
+        likelihood_coop_1 = np.prod(np.array(self.cooperative_likelihood_history)[-3:, 0])
+        likelihood_coop_2 = np.prod(np.array(self.cooperative_likelihood_history)[-3:, 1])
+        if likelihood_coop_1 < 0.4:
+          self.defect1 = True
+        else:
+          self.defect1 = False
+        if likelihood_coop_2 < 0.4:
+          self.defect2 = True
+        else:
+          self.defect2 = False
+
 
       # Do updates
       params1.data += update1
@@ -532,8 +556,8 @@ if __name__ == "__main__":
   stag_payoffs2 = np.array([[2., -3.], [0., 1.]])
 
   ipd = IPD_PG(payoffs1=pd_payoffs1, payoffs2=pd_payoffs2)
-  ipd.learn_multi_rep('stag', 10, 10., optim.gradient_ascent_minmax_reward,
-                      optim.gradient_ascent_minmax_reward, grad, n_epochs=100)
+  ipd.learn_multi_rep('pd', 10, 10.0, optim.gradient_ascent_minmax_reward,
+                      optim.gradient_ascent_minmax_reward, grad, observable_seed=False, n_epochs=100)
 
   # no_enforce = IPD_PG(payoffs1=no_enforce_payoffs_1, payoffs2=no_enforce_payoffs_2)
   # no_enforce.learn_multi_rep('game-2-with-ht', 20, 0.5, optim.gradient_ascent_minmax_reward,

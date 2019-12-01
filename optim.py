@@ -135,10 +135,10 @@ def lola(V, V1, V2, params1, params2, lr, player, defect, R_opponent):
   if player == 1:
     dV2d21 = T.stack([grad(d, params1, retain_graph=True)[0] for d in dV2d2])
     # ToDo: assuming learning rates are equal.
-    update = lr * lr * T.matmul(dV1d2, dV2d21).data
+    update = (lr * dV1d1).data + (lr * lr * T.matmul(dV1d2, dV2d21).data)
   else:
     dV1d12 = T.stack([grad(d, params2, retain_graph=True)[0] for d in dV1d1])
-    update = lr * lr * T.matmul(dV2d1, dV1d12).data
+    update = (lr * dV2d2).data + lr * lr * T.matmul(dV2d1, dV1d12).data
   return update, None
 
 
