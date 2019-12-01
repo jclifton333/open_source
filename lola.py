@@ -1,3 +1,4 @@
+import pdb
 import numpy as np
 import matplotlib.pyplot as plt
 import torch as T
@@ -11,7 +12,6 @@ import sys
 
 # ToDo: Implement parent class for Lola and SOS
 class SOSLearner(metaclass=ABCMeta):
-  class LolaLearner(metaclass=ABCMeta):
   def __init__(self, payoffs1=[-1, -3, 0, -2], payoffs2=[-1, 0, -3, -2], **kwargs):
     # overwrite these in child classes; **kwargs can be used here
     self.num_params1 = -1
@@ -40,47 +40,54 @@ class SOSLearner(metaclass=ABCMeta):
                       params1,
                       params2,
                       V1,
-                      V2,
-                      lola1,
-                      lola2,
-                      include_second_lola_term1,
-                      include_second_lola_term2,
+                      V2
                       ):
+    # From SOS IPD experiment
+    a = 0.5
+    b = 0.1
+
     if lr_opponent is None:
       lr_opponent = lr
     dV1d1, dV1d2 = grad(V1, (params1, params2), create_graph=True)
     dV2d1, dV2d2 = grad(V2, (params1, params2), create_graph=True)
+    dV1 = T.stack([dV1d1, dV1d2], 1)
+    dV2 = T.stack([dV2d1, dV2d2], 1)
+    dV = T.cat([dV1, dV2], 0)
 
     # Compute opponent Hessians
     Ho_1 = T.stack([grad(d, params1, retain_graph=True)[0] for d in dV1d2])
+    Ho_top = T.cat([T.zeros(Ho_1.shape), Ho_1], 1)
     Ho_2 = T.stack([grad(d, params2, retain_graph=True)[0] for d in dV2d1])
+    Ho_bottom = T.cat([Ho_2, T.zeros(Ho_2.shape)], 1)
+    Ho = T.cat([Ho_top, Ho_bottom], 0)
 
     # xi is vector of gradients of player-specific losses wrt corresponding player-specific parameters
-    xi = T.stack([dV1d1, dV2d2])
-
-    params1.data += (lr * dV1d1).data
-    if lola1:
-      dV2d21 = T.stack([grad(d, params1, retain_graph=True)[0] for d in dV2d2])
-      params1.data += lr * lr_opponent * T.matmul(dV1d2, dV2d21).data
-      if include_second_lola_term1:
-        dV1d21 = T.stack([grad(d, params1, retain_graph=True)[0] for d in dV1d2])
-        params1.data += lr * lr_opponent * T.matmul(dV2d2, dV1d21).data
-
-    params2.data += (lr * dV2d2).data
-    if lola2:
-      dV1d12 = T.stack([grad(d, params2, retain_graph=True)[0] for d in dV1d1])
-      params2.data += lr * lr_opponent * T.matmul(dV2d1, dV1d12).data
-      if include_second_lola_term2:
-        dV2d12 = T.stack([grad(d, params2, retain_graph=True)[0] for d in dV2d1])
-        params2.data += lr * lr_opponent * T.matmul(dV1d1, dV2d12).data
+    xi = T.cat([dV1d1, dV2d2])
+    xi_norm_sq = T.dot(xi, xi)
+    # ToDo: make sure signs are correct, since SOS paper uses minimization of loss (instead of max value)
+    xi_10 = T.mv((T.eye(len(xi)) - lr*Ho), xi)
+    # ToDo: check dimensions in mat vec multiplication
+    chi_11 = T.mv(Ho_top, T.cat([dV1d1, dV2d1], 0))
+    chi_12 = T.mv(Ho_bottom, T.cat([dV2d1, dV2d2], 0))
+    chi_1 = T.cat([chi_11, chi_12], 0)
+    chi_dot_xi_1 = T.dot(-lr*chi_1, xi_10)
+    if chi_dot_xi_1 > 0:
+      p1 = 1.
+    else:
+      xi_10_norm_sq = T.dot(xi_10, xi_10)
+      p1 = np.min((1., -a*xi_10_norm_sq / chi_dot_xi_1))
+    if T.sqrt(xi_norm_sq) < b:
+      p2 = xi_norm_sq
+    else:
+      p2 = 1.
+    p = np.min((p1, p2))
+    xi_1p = xi_10 - p*lr*chi_1
+    params1.data -= lr*xi_1p[:len(params1)]
+    params2.data -= lr*xi_1p[len(params1):]
 
   def learn(self,
             lr,
             lr_opponent=None,
-            lola1=False,
-            lola2=False,
-            include_second_lola_term1=False,
-            include_second_lola_term2=False,
             std=0.01,
             n_epochs=2000,
             n_print_every=None,
@@ -115,6 +122,7 @@ class SOSLearner(metaclass=ABCMeta):
       self.pr_CC_log[i] = pCC = outcomes[0].data
       self.pr_DD_log[i] = pDD = outcomes[3].data
       V1, V2 = self.payoffs(outcomes)
+      V1, V2 = -V1, -V2
       self.payoffs1_log[i] = V1
       self.payoffs2_log[i] = V2
       if n_print_every and i % n_print_every == 0:
@@ -125,11 +133,7 @@ class SOSLearner(metaclass=ABCMeta):
         params1,
         params2,
         V1,
-        V2,
-        lola1,
-        lola2,
-        include_second_lola_term1,
-        include_second_lola_term2,
+        V2
       )
 
     self.final_params = (params1, params2)
@@ -288,8 +292,8 @@ class LolaLearner(metaclass=ABCMeta):
       print("This learner has not learnt yet.")
 
 
-class IteratedLola(LolaLearner):
-  def __init__(self, payoffs1=[-1, -3, 0, -2], payoffs2=[-1, 0, -3, -2]):
+class IteratedSOS(SOSLearner):
+  def __init__(self, payoffs1=[-1., -3., 0., -2.], payoffs2=[-1., 0., -3., -2.]):
     super().__init__(payoffs1=payoffs1, payoffs2=payoffs2)
     self.num_params1 = 5
     self.num_params2 = 5
@@ -314,5 +318,8 @@ class IteratedLola(LolaLearner):
 if __name__ == "__main__":
   stag_payoffs1 = [2., -3., 1., 1.]
   stag_payoffs2 = [2., 1., -3., 1.]
-  istag = IteratedLola(payoffs1=stag_payoffs1, payoffs2=stag_payoffs2)
-  istag.learn(1., lola1=True, lola2=False)
+  istag = IteratedSOS(payoffs1=stag_payoffs1, payoffs2=stag_payoffs2)
+  # istag.learn(10.)
+  ipd = IteratedSOS()
+  np.random.seed(4)
+  ipd.learn(1.)
