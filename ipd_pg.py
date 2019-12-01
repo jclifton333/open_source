@@ -203,6 +203,7 @@ class PD_PGLearner(metaclass=ABCMeta):
                       suboptimality_tolerance=0.1,
                       hypothesis_test=False,
                       observable_seed=True,
+                      cutoff=0.1,
                       exploitability_policy=None, # Must be supplied if hypothesis_test=True
                       **kwargs,  # these are forwarded to the parameters-to-outcomes function
                       ):
@@ -226,6 +227,7 @@ class PD_PGLearner(metaclass=ABCMeta):
                           suboptimality_tolerance=suboptimality_tolerance,
                           hypothesis_test=hypothesis_test,
                           observable_seed=observable_seed,
+                          cutoff=cutoff,
                           exploitability_policy=exploitability_policy, # Must be supplied if hypothesis_test=True
                           **kwargs  # these are forwarded to the parameters-to-outcomes function
                           )
@@ -265,6 +267,7 @@ class PD_PGLearner(metaclass=ABCMeta):
             hypothesis_test=False,
             exploitability_policy=None, # Must be supplied if hypothesis_test=True,
             observable_seed=True,
+            cutoff=0.1,
             **kwargs,  # these are forwarded to the parameters-to-outcomes function
             ):
     self.pr_CC_log = np.empty(n_epochs)
@@ -426,11 +429,11 @@ class PD_PGLearner(metaclass=ABCMeta):
         self.cooperative_likelihood_history.append([p_a1_barg, p_a2_barg])
         likelihood_coop_1 = np.prod(np.array(self.cooperative_likelihood_history)[-3:, 0])
         likelihood_coop_2 = np.prod(np.array(self.cooperative_likelihood_history)[-3:, 1])
-        if likelihood_coop_1 < 0.4:
+        if likelihood_coop_1 < cutoff:
           self.defect1 = True
         else:
           self.defect1 = False
-        if likelihood_coop_2 < 0.4:
+        if likelihood_coop_2 < cutoff:
           self.defect2 = True
         else:
           self.defect2 = False
@@ -462,8 +465,10 @@ class PD_PGLearner(metaclass=ABCMeta):
 
         # Plot payoffs time series
         sns.lineplot(x='steps', y='payoffs', hue='player', data=probs_series_df, ax=axs[1])
-        plt.show()
-
+        if label is not None: # save figure if filename given
+          plt.savefig('{}.png'.format(label))
+        else:
+          plt.show()
       else:
         steps = np.arange(len(self.pr_CC_log))
         fig, axs = plt.subplots(nrows=2, ncols=1, sharex=True)
@@ -556,8 +561,14 @@ if __name__ == "__main__":
   stag_payoffs2 = np.array([[2., -3.], [0., 1.]])
 
   ipd = IPD_PG(payoffs1=pd_payoffs1, payoffs2=pd_payoffs2)
-  ipd.learn_multi_rep('pd', 10, 10.0, optim.gradient_ascent_minmax_reward,
-                      optim.gradient_ascent_minmax_reward, grad, observable_seed=False, n_epochs=100)
+  ipd.learn_multi_rep('pd-tft-lr=1-cutoff=0.1', 20, 1.0, optim.gradient_ascent_minmax_reward,
+                      optim.gradient_ascent_minmax_reward, grad, observable_seed=False, n_epochs=1000)
+  ipd.learn_multi_rep('pd-tft-lr=1-cutoff=0.4', 20, 1.0, optim.gradient_ascent_minmax_reward,
+                      optim.gradient_ascent_minmax_reward, grad, cutoff=0.4, observable_seed=False, n_epochs=1000)
+  ipd.learn_multi_rep('pd-tft-lr=1-cutoff=0.9', 20, 1.0, optim.gradient_ascent_minmax_reward,
+                      optim.gradient_ascent_minmax_reward, grad, cutoff=0.9, observable_seed=False, n_epochs=1000)
+  ipd.learn_multi_rep('pd-lola-lr=1', 20, 1.0, optim.lola,
+                      optim.lola, grad, observable_seed=False, n_epochs=1000)
 
   # no_enforce = IPD_PG(payoffs1=no_enforce_payoffs_1, payoffs2=no_enforce_payoffs_2)
   # no_enforce.learn_multi_rep('game-2-with-ht', 20, 0.5, optim.gradient_ascent_minmax_reward,
