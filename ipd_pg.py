@@ -482,38 +482,35 @@ class PD_PGLearner(metaclass=ABCMeta):
         self.bargaining_action_probs1.append(p_a1_barg)
         self.bargaining_action_probs2.append(p_a2_barg)
         self.cooperative_likelihood_history.append([p_a1_barg, p_a2_barg])
-        LOOK_BACK = 40
+        LOOK_BACK = 50
         look_back = np.min((LOOK_BACK, i+1))
         likelihood_coop_1 = np.prod(np.array(self.cooperative_likelihood_history)[no_punish_ixs_2[-look_back:-1], 0])
         likelihood_coop_2 = np.prod(np.array(self.cooperative_likelihood_history)[no_punish_ixs_1[-look_back:-1], 1])
         max_lik_stationary_1, max_lik_stationary_2 = self.maximum_likelihood(no_punish_ixs_2[-look_back:], no_punish_ixs_1[-look_back:])
         TOL = 0.5
         if i > 50:
-          ratios_1 = []
-          ratios_2 = []
-          for b in range(100):
-            no_punish_ixs_1_b = np.random.choice(no_punish_ixs_1[-look_back], look_back)
-            no_punish_ixs_2_b = np.random.choice(no_punish_ixs_2[-look_back], look_back)
-            likelihood_coop_1_b = np.prod(np.array(self.cooperative_likelihood_history)[no_punish_ixs_2_b[:-1], 0])
-            likelihood_coop_2_b = np.prod(np.array(self.cooperative_likelihood_history)[no_punish_ixs_1_b[:-1], 1])
+          # ratios_1 = []
+          # ratios_2 = []
+          # for b in range(100):
+          #   no_punish_ixs_1_b = np.random.choice(no_punish_ixs_1[-look_back], look_back)
+          #   no_punish_ixs_2_b = np.random.choice(no_punish_ixs_2[-look_back], look_back)
+          #   likelihood_coop_1_b = np.prod(np.array(self.cooperative_likelihood_history)[no_punish_ixs_2_b[:-1], 0])
+          #   likelihood_coop_2_b = np.prod(np.array(self.cooperative_likelihood_history)[no_punish_ixs_1_b[:-1], 1])
             # ToDo: also need to pass indices of bootstrapped... indices to max_lik
-            max_lik_stationary_1_b, max_lik_stationary_2_b = self.maximum_likelihood(no_punish_ixs_2_b,
-                                                                                     no_punish_ixs_1_b)
-            ratios_1.append(max_lik_stationary_1_b / likelihood_coop_1)
-            ratios_2.append(max_lik_stationary_2_b / likelihood_coop_2)
-          pdb.set_trace()
+          #   max_lik_stationary_1_b, max_lik_stationary_2_b = self.maximum_likelihood(no_punish_ixs_2_b,
+          #                                                                           no_punish_ixs_1_b)
+          #   ratios_1.append(max_lik_stationary_1_b / likelihood_coop_1)
+          #   ratios_2.append(max_lik_stationary_2_b / likelihood_coop_2)
           if i == 51:
             initial_defect_lik_1 = max_lik_stationary_1 / likelihood_coop_1
             initial_defect_lik_2 = max_lik_stationary_2 / likelihood_coop_2
-          if max_lik_stationary_1 / likelihood_coop_1 >= 10.:
-            pdb.set_trace()
+          if np.log(max_lik_stationary_1)/len(no_punish_ixs_2) - np.log(likelihood_coop_1)/len(no_punish_ixs_2) >= 10 / (i - 50):
             self.defect1 = True
             defect_lik_1 = max_lik_stationary_1 /likelihood_coop_1
           else:
             self.defect1 = False
             no_punish_ixs_1.append(i+1)
-          if max_lik_stationary_2 / likelihood_coop_2 >= 10.:
-            pdb.set_trace()
+          if np.log(max_lik_stationary_2)/len(no_punish_ixs_1) - np.log(likelihood_coop_2)/len(no_punish_ixs_1) >= 10 / (i - 50):
             self.defect2 = True
             defect_lik_2 = max_lik_stationary_2 / likelihood_coop_2
           else:
@@ -660,7 +657,7 @@ if __name__ == "__main__":
 
   ipd = IPD_PG(payoffs1=pd_payoffs1, payoffs2=pd_payoffs2)
   ipd.learn_multi_rep('pd-private-tft-2', 5, 1.0, optim.gradient_ascent_minmax_reward,
-                      optim.gradient_ascent_minmax_reward, grad, observable_seed=False, n_epochs=500)
+                    optim.gradient_ascent_minmax_reward, grad, observable_seed=False, n_epochs=500)
   ipd.learn_multi_rep('pd-private-tft-naive-2', 5, 1.0, optim.gradient_ascent_minmax_reward,
                       optim.naive_gradient_ascent, grad, observable_seed=False, n_epochs=500)
 
