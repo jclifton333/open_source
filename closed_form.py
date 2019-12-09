@@ -66,5 +66,5 @@ if __name__ == "__main__":
   chicken_payoffs_2 = np.array([0, 1, -1, -5])
   dummy_payoffs_1 = np.array([1, -1, 1, -1])
   dummy_payoffs_2 = np.array([-1, 1, -1, 1])
-  gradient_info_at_p([0, 0, 0, 0], stag_payoffs_1, stag_payoffs_2)
+  gradient_info_at_p([10., -10., 10., -10], pd_payoffs_1, pd_payoffs_2)
 

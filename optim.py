@@ -126,6 +126,7 @@ def gradient_ascent_minmax_reward(V, V1, V2, params1, params2, lr, player, defec
   else:
     a_punish = None
 
+  print('a punish: {}'.format(a_punish))
   return update, a_punish
 
 
@@ -142,7 +143,57 @@ def lola(V, V1, V2, params1, params2, lr, player, defect, R_opponent):
   return update, None
 
 
-def naive_gradient_ascent(V, V2, params1, params2, lr, player, defect, R_opponent):
+def sos(V, V1, V2, params1, params2, lr, player, defect, R_opponent):
+  # From SOS IPD experiment
+  a = 0.5
+  b = 0.1
+
+  # Assuming maximization
+  dV1d1, dV1d2 = grad(V1((params1, params2)), (params1, params2), create_graph=True)
+  dV2d1, dV2d2 = grad(V2((params1, params2)), (params1, params2), create_graph=True)
+  dV1d1 = -dV1d1
+  dV1d2 = -dV1d2
+  dV2d1 = -dV2d1
+  dV2d2 = -dV2d2
+
+  # Compute opponent Hessians
+  Ho_1 = T.stack([grad(d, params1, retain_graph=True)[0] for d in dV1d2])
+  Ho_top = T.cat([T.zeros(Ho_1.shape), Ho_1], 1)
+  Ho_2 = T.stack([grad(d, params2, retain_graph=True)[0] for d in dV2d1])
+  Ho_bottom = T.cat([Ho_2, T.zeros(Ho_2.shape)], 1)
+  Ho = T.cat([Ho_top, Ho_bottom], 0)
+
+  # xi is vector of gradients of player-specific losses wrt corresponding player-specific parameters
+  xi = T.cat([dV1d1, dV2d2])
+  xi_norm_sq = T.dot(xi, xi)
+  # ToDo: make sure signs are correct, since SOS paper uses minimization of loss (instead of max value)
+  xi_10 = T.mv((T.eye(len(xi)) - lr * Ho), xi)
+  # ToDo: check dimensions in mat vec multiplication
+  chi_11 = T.mv(Ho_top, T.cat([dV1d1, dV2d1], 0))
+  chi_12 = T.mv(Ho_bottom, T.cat([dV2d1, dV2d2], 0))
+  chi_1 = T.cat([chi_11, chi_12], 0)
+  chi_dot_xi_1 = T.dot(-lr * chi_1, xi_10)
+  if chi_dot_xi_1 > 0:
+    p1 = 1.
+  else:
+    xi_10_norm_sq = T.dot(xi_10, xi_10)
+    p1 = np.min((1., -a * xi_10_norm_sq / chi_dot_xi_1))
+  if T.sqrt(xi_norm_sq) < b:
+    p2 = xi_norm_sq
+  else:
+    p2 = 1.
+  p = np.min((p1, p2))
+  xi_1p = xi_10 - p * lr * chi_1
+
+  if player == 1:
+    update = -xi_1p[:len(params1)]
+  elif player == 2:
+    update = -xi_1p[len(params1):]
+  pdb.set_trace()
+  return update, None
+
+
+def naive_gradient_ascent(V, V1, V2, params1, params2, lr, player, defect, R_opponent):
   """
   Take the minmax action with respect to the opponent's estimated reward if defect.
 
