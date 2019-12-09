@@ -447,16 +447,17 @@ class PD_PGLearner(metaclass=ABCMeta):
         likelihood_coop_1 = np.prod(np.array(self.cooperative_likelihood_history)[:, 0])
         likelihood_coop_2 = np.prod(np.array(self.cooperative_likelihood_history)[:, 1])
         max_lik_stationary_1, max_lik_stationary_2 = self.maximum_likelihood()
+        TOL = 0.1
         if i > 10:
           if i == 11:
             initial_defect_lik_1 = max_lik_stationary_1 / likelihood_coop_1
             initial_defect_lik_2 = max_lik_stationary_2 / likelihood_coop_2
-          if max_lik_stationary_1 / likelihood_coop_1 >= 1 + initial_defect_lik_1 / (i - 10):
+          if max_lik_stationary_1 / likelihood_coop_1 >= 1 + initial_defect_lik_1 / (i - 10) + TOL:
             self.defect1 = True
             defect_lik_1 = max_lik_stationary_1 / likelihood_coop_1
           else:
             self.defect1 = False
-          if max_lik_stationary_2 / likelihood_coop_2 >= 1 + initial_defect_lik_2 / (i - 10):
+          if max_lik_stationary_2 / likelihood_coop_2 >= 1 + initial_defect_lik_2 / (i - 10) + TOL:
             self.defect2 = True
             defect_lik_2 = max_lik_stationary_2 / likelihood_coop_2
           else:
