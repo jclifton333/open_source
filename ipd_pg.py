@@ -250,23 +250,37 @@ class PD_PGLearner(metaclass=ABCMeta):
       # Plot
       self.plot_last_learning(label, multi_rep=True)
 
-  def maximum_likelihood(self):
+  def maximum_likelihood(self, no_punish_ixs_1_, no_punish_ixs_2_):
+    # look_back = np.min((look_back, len(self.action_history)-1))
     # Get maximum likelihood stationary policies
     # Player 1
-    cooperate_in_state_c_1 = [ah[0] for ix, ah in enumerate(self.action_history[:-1]) if self.state_history[ix+1][0] == 0]
-    cooperate_in_state_d_1 = [ah[0] for ix, ah in enumerate(self.action_history[:-1]) if self.state_history[ix+1][0] == 1]
+    cooperate_in_state_c_1 = np.array([ah[0] for ix, ah in enumerate(self.action_history[:-1])
+                                       if self.state_history[ix+1][0] == 0 and ix in no_punish_ixs_1_])
+    cooperate_in_state_d_1 = np.array([ah[0] for ix, ah in enumerate(self.action_history[:-1])
+                                       if self.state_history[ix+1][0] == 1 and ix in no_punish_ixs_1_])
 
     # Player 2
-    cooperate_in_state_c_2 = [ah[1] for ix, ah in enumerate(self.action_history[:-1]) if self.state_history[ix+1][1] == 0]
-    cooperate_in_state_d_2 = [ah[1] for ix, ah in enumerate(self.action_history[:-1]) if self.state_history[ix+1][1] == 1]
+    cooperate_in_state_c_2 = np.array([ah[1] for ix, ah in enumerate(self.action_history[:-1])
+                                       if self.state_history[ix+1][1] == 0 and ix in no_punish_ixs_2_])
+    cooperate_in_state_d_2 = np.array([ah[1] for ix, ah in enumerate(self.action_history[:-1])
+                                       if self.state_history[ix+1][1] == 1 and ix in no_punish_ixs_2_])
 
     # Max likelihood parameters
-    p1_c, p1_d = np.mean(cooperate_in_state_c_1), np.mean(cooperate_in_state_d_1)
-    p2_c, p2_d = np.mean(cooperate_in_state_c_2), np.mean(cooperate_in_state_d_2)
+    p1_c, p1_d = np.mean(1-cooperate_in_state_c_1), np.mean(1-cooperate_in_state_d_1)
+    p2_c, p2_d = np.mean(1-cooperate_in_state_c_2), np.mean(1-cooperate_in_state_d_2)
 
     # Likelihoods
-    max_lik_1 = np.power(p1_c, len(cooperate_in_state_c_1)) * np.power(p1_d, len(cooperate_in_state_d_1))
-    max_lik_2 = np.power(p2_c, len(cooperate_in_state_c_2)) * np.power(p2_d, len(cooperate_in_state_d_2))
+    n_cc_1 = len(cooperate_in_state_c_1)
+    f_cc_1 = np.sum(cooperate_in_state_c_1)
+    n_dc_1 = len(cooperate_in_state_d_1)
+    f_dc_1 = np.sum(cooperate_in_state_d_1)
+    n_cc_2 = len(cooperate_in_state_c_2)
+    f_cc_2 = np.sum(cooperate_in_state_c_2)
+    n_dc_2 = len(cooperate_in_state_d_2)
+    f_dc_2 = np.sum(cooperate_in_state_d_2)
+
+    max_lik_1 = np.power(p1_c, n_cc_1 - f_cc_1) * np.power(1-p1_c, f_cc_1) * np.power(p1_d, n_dc_1 - f_dc_1) * np.power(1-p1_d, f_dc_1)
+    max_lik_2 = np.power(p2_c, n_cc_2 - f_cc_2) * np.power(1-p2_c, f_cc_2) * np.power(p2_d, n_dc_2 - f_dc_2) * np.power(1-p2_d, f_dc_2)
     return max_lik_1, max_lik_2
 
   def learn(self,
@@ -318,9 +332,25 @@ class PD_PGLearner(metaclass=ABCMeta):
       params2 += T.tensor(init_params2).float()
     params2.requires_grad_()
 
+    bargaining_params1 = std * T.randn(self.num_params1)
+    if init_params1:
+      assert len(init_params1) == self.num_params1, \
+        "initial parameters for player 1 don't have correct length"
+      bargaining_params1 += T.tensor(init_params1).float()
+    bargaining_params1.requires_grad_()
+
+    bargaining_params2 = std * T.randn(self.num_params2)
+    if init_params2:
+      assert len(init_params2) == self.num_params2, \
+        "initial parameters for player 2 don't have correct length"
+      bargaining_params2 += T.tensor(init_params2).float()
+    bargaining_params2.requires_grad_()
+
     defect_lik_1 = 1.
     defect_lik_2 = 1.
     bargaining_probs1 = bargaining_probs2 = [0.5, 0.5]
+    no_punish_ixs_1 = [0]
+    no_punish_ixs_2 = [0]
     for i in range(n_epochs):
       print(i)
 
@@ -332,10 +362,10 @@ class PD_PGLearner(metaclass=ABCMeta):
                                             player_1_exploitable_, player_2_exploitable_)
 
       # Override actions with exploration or punishment
-      if np.random.random() < 0.05:
-        a1 = np.random.choice(2)
-      if np.random.random() < 0.05:
-        a2 = np.random.choice(2)
+      # if np.random.random() < 0.05:
+      #  a1 = np.random.choice(2)
+      # if np.random.random() < 0.05:
+      #   a2 = np.random.choice(2)
       if self.a_punish_1 is not None: # If decided to punish on the last turn, replace with punishment action
         a1 = self.a_punish_1
       if self.a_punish_2 is not None:
@@ -444,33 +474,41 @@ class PD_PGLearner(metaclass=ABCMeta):
         p_a1_barg = bargaining_probs1[a1]
         p_a2_barg = bargaining_probs2[a2]
         self.cooperative_likelihood_history.append([p_a1_barg, p_a2_barg])
-        likelihood_coop_1 = np.prod(np.array(self.cooperative_likelihood_history)[:, 0])
-        likelihood_coop_2 = np.prod(np.array(self.cooperative_likelihood_history)[:, 1])
-        max_lik_stationary_1, max_lik_stationary_2 = self.maximum_likelihood()
-        TOL = 0.1
-        if i > 10:
-          if i == 11:
+        LOOK_BACK = 40
+        look_back = np.min((LOOK_BACK, i+1))
+        likelihood_coop_1 = np.prod(np.array(self.cooperative_likelihood_history)[no_punish_ixs_1[-look_back:-1], 0])
+        likelihood_coop_2 = np.prod(np.array(self.cooperative_likelihood_history)[no_punish_ixs_2[-look_back:-1], 1])
+        max_lik_stationary_1, max_lik_stationary_2 = self.maximum_likelihood(no_punish_ixs_1[-look_back:], no_punish_ixs_2[-look_back:])
+        TOL = 0.5
+        if i > 50:
+          if i == 51:
             initial_defect_lik_1 = max_lik_stationary_1 / likelihood_coop_1
             initial_defect_lik_2 = max_lik_stationary_2 / likelihood_coop_2
-          if max_lik_stationary_1 / likelihood_coop_1 >= 1 + initial_defect_lik_1 / (i - 10) + TOL:
+          if max_lik_stationary_1 / likelihood_coop_1 >= 10.:
             self.defect1 = True
-            defect_lik_1 = max_lik_stationary_1 / likelihood_coop_1
+            defect_lik_1 = max_lik_stationary_1 /likelihood_coop_1
           else:
             self.defect1 = False
-          if max_lik_stationary_2 / likelihood_coop_2 >= 1 + initial_defect_lik_2 / (i - 10) + TOL:
+            no_punish_ixs_1.append(i+1)
+          if max_lik_stationary_2 / likelihood_coop_2 >= 10.:
             self.defect2 = True
             defect_lik_2 = max_lik_stationary_2 / likelihood_coop_2
           else:
             self.defect2 = False
-
-        bargaining_probs1 = T.sigmoid((params1 + bargaining_update1)[(2 * a2):(2 * a2 + 2)]).detach().numpy()
-        bargaining_probs2 = T.sigmoid((params2 + bargaining_update2)[(2 * a1):(2 * a1 + 2)]).detach().numpy()
+            no_punish_ixs_2.append(i+1)
+        else:
+          no_punish_ixs_1.append(i+1)
+          no_punish_ixs_2.append(i+1)
+        bargaining_probs1 = T.sigmoid((bargaining_params1 + bargaining_update1)[(2 * a2):(2 * a2 + 2)]).detach().numpy()
+        bargaining_probs2 = T.sigmoid((bargaining_params2 + bargaining_update2)[(2 * a1):(2 * a1 + 2)]).detach().numpy()
         bargaining_probs1 /= np.sum(bargaining_probs1)
         bargaining_probs2 /= np.sum(bargaining_probs2)
 
       # Do updates
       params1.data += update1
       params2.data += update2
+      bargaining_params1.data += bargaining_update1
+      bargaining_params2.data += bargaining_update2
 
     self.final_params = (params1, params2)
     if plot_learning:
@@ -482,11 +520,15 @@ class PD_PGLearner(metaclass=ABCMeta):
     if self.pr_CC_log is not None:
       if multi_rep:
         # Plot prob time series
-        fig, axs = plt.subplots(nrows=2)
+        fig, axs = plt.subplots(nrows=3)
+        payoffs = np.hstack((self.payoffs1_log, self.payoffs2_log))
         probs_series_df = {'prob': np.hstack((self.pr_CC_log, self.pr_DD_log)),
                            'steps': np.hstack((self.step_list, self.step_list)),
                            'profile': np.hstack((['CC'] * len(self.step_list), ['DD'] * len(self.step_list))),
-                           'payoffs': np.hstack((self.payoffs1_log, self.payoffs2_log)),
+                           'payoffs': payoffs,
+                           'cum_payoffs': np.hstack((np.cumsum(self.payoffs1_log) / np.arange(1, len(self.payoffs1_log)+1),
+                                                     np.cumsum(self.payoffs2_log) / np.arange(1, len(self.payoffs2_log)+1))),
+
                            'player': np.hstack(
                              (['player 1'] * len(self.step_list), ['player 2'] * len(self.step_list)))}
         probs_series_df = pd.DataFrame(probs_series_df)
@@ -494,6 +536,10 @@ class PD_PGLearner(metaclass=ABCMeta):
 
         # Plot payoffs time series
         sns.lineplot(x='steps', y='payoffs', hue='player', data=probs_series_df, ax=axs[1])
+
+        # Cumulative payoffs time series
+        sns.lineplot(x='steps', y='cum_payoffs', hue='player', data=probs_series_df, ax=axs[2])
+
         if label is not None: # save figure if filename given
           plt.savefig('{}.png'.format(label))
         else:
@@ -590,10 +636,10 @@ if __name__ == "__main__":
   stag_payoffs2 = np.array([[2., -3.], [0., 1.]])
 
   ipd = IPD_PG(payoffs1=pd_payoffs1, payoffs2=pd_payoffs2)
-  ipd.learn_multi_rep('pd-private-tft-naive', 20, 1.0, optim.gradient_ascent_minmax_reward,
-                      optim.naive_gradient_ascent, grad, observable_seed=False, n_epochs=1000)
-  ipd.learn_multi_rep('pd-private-tft', 20, 1.0, optim.gradient_ascent_minmax_reward,
-                      optim.gradient_ascent_minmax_reward, grad, observable_seed=False, n_epochs=1000)
+  ipd.learn_multi_rep('pd-private-tft-2', 5, 1.0, optim.gradient_ascent_minmax_reward,
+                      optim.gradient_ascent_minmax_reward, grad, observable_seed=False, n_epochs=500)
+  ipd.learn_multi_rep('pd-private-tft-naive-2', 5, 1.0, optim.gradient_ascent_minmax_reward,
+                      optim.naive_gradient_ascent, grad, observable_seed=False, n_epochs=500)
 
   # no_enforce = IPD_PG(payoffs1=no_enforce_payoffs_1, payoffs2=no_enforce_payoffs_2)
   # no_enforce.learn_multi_rep('game-2-with-ht', 20, 0.5, optim.gradient_ascent_minmax_reward,
