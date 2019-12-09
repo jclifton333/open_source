@@ -412,13 +412,8 @@ class PD_PGLearner(metaclass=ABCMeta):
       # Define bargaining value function estimator
       # V1, V2 = self.payoffs(params1, params2, ipw_history, reward_history, action_history, state_history)
       # Get disagreement points
-      max_a1_1 = np.max((self.opponent_reward_estimates_2[0, 0], self.opponent_reward_estimates_2[0, 1]))
-      max_a2_1 = np.max((self.opponent_reward_estimates_2[1, 0], self.opponent_reward_estimates_2[1, 1]))
-      d1 = np.min((max_a2_1, max_a1_1))
-      max_a1_2 = np.max((self.opponent_reward_estimates_1[0, 0], self.opponent_reward_estimates_1[0, 1]))
-      max_a2_2 = np.max((self.opponent_reward_estimates_1[1, 0], self.opponent_reward_estimates_1[1, 1]))
-      d2 = np.min((max_a1_2, max_a2_2))
-
+      d1 = np.max(self.opponent_reward_estimates_2[:, 1])
+      d2 = np.max(self.opponent_reward_estimates_1[:, 1])
       def V(p1p2):
         p1, p2 = p1p2
         V1_, V2_ = self.payoffs(p1, p2, self.ipw_history, self.reward_history, self.action_history, self.state_history)
