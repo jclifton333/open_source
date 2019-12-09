@@ -411,10 +411,18 @@ class PD_PGLearner(metaclass=ABCMeta):
 
       # Define bargaining value function estimator
       # V1, V2 = self.payoffs(params1, params2, ipw_history, reward_history, action_history, state_history)
+      # Get disagreement points
+      max_a1_1 = np.max((self.opponent_reward_estimates_2[0, 0], self.opponent_reward_estimates_2[0, 1]))
+      max_a2_1 = np.max((self.opponent_reward_estimates_2[1, 0], self.opponent_reward_estimates_2[1, 1]))
+      d1 = np.min((max_a2_1, max_a1_1))
+      max_a1_2 = np.max((self.opponent_reward_estimates_1[0, 0], self.opponent_reward_estimates_1[0, 1]))
+      max_a2_2 = np.max((self.opponent_reward_estimates_1[1, 0], self.opponent_reward_estimates_1[1, 1]))
+      d2 = np.min((max_a1_2, max_a2_2))
+
       def V(p1p2):
         p1, p2 = p1p2
         V1_, V2_ = self.payoffs(p1, p2, self.ipw_history, self.reward_history, self.action_history, self.state_history)
-        return (V1_ + V2_).requires_grad_()
+        return (T.log(V1_ - d1) + T.log(V2_ - d2)).requires_grad_()
 
       def V1(p1p2):
         p1, p2 = p1p2
@@ -504,13 +512,13 @@ class PD_PGLearner(metaclass=ABCMeta):
           if i == 51:
             initial_defect_lik_1 = max_lik_stationary_1 / likelihood_coop_1
             initial_defect_lik_2 = max_lik_stationary_2 / likelihood_coop_2
-          if np.log(max_lik_stationary_1)/len(no_punish_ixs_2) - np.log(likelihood_coop_1)/len(no_punish_ixs_2) >= 1 / (i - 50):
+          if np.log(max_lik_stationary_1)/len(no_punish_ixs_2) - np.log(likelihood_coop_1)/len(no_punish_ixs_2) >= 10 / (i - 50):
             self.defect1 = True
             defect_lik_1 = max_lik_stationary_1 /likelihood_coop_1
           else:
             self.defect1 = False
             no_punish_ixs_1.append(i+1)
-          if np.log(max_lik_stationary_2)/len(no_punish_ixs_1) - np.log(likelihood_coop_2)/len(no_punish_ixs_1) >= 1 / (i - 50):
+          if np.log(max_lik_stationary_2)/len(no_punish_ixs_1) - np.log(likelihood_coop_2)/len(no_punish_ixs_1) >= 10 / (i - 50):
             self.defect2 = True
             defect_lik_2 = max_lik_stationary_2 / likelihood_coop_2
           else:
@@ -656,9 +664,11 @@ if __name__ == "__main__":
   stag_payoffs2 = np.array([[2., -3.], [0., 1.]])
 
   ipd = IPD_PG(payoffs1=pd_payoffs1, payoffs2=pd_payoffs2)
-  ipd.learn_multi_rep('pd-private-tft-2', 20, 1.0, optim.gradient_ascent_minmax_reward,
+  ipd.learn_multi_rep('pd-tft-nash-10', 20, 1.0, optim.gradient_ascent_minmax_reward,
+                    optim.gradient_ascent_minmax_reward, grad, observable_seed=True, n_epochs=1000)
+  ipd.learn_multi_rep('pd-private-tft-nash-10', 20, 1.0, optim.gradient_ascent_minmax_reward,
                     optim.gradient_ascent_minmax_reward, grad, observable_seed=False, n_epochs=1000)
-  ipd.learn_multi_rep('pd-private-tft-naive-2', 20, 1.0, optim.gradient_ascent_minmax_reward,
+  ipd.learn_multi_rep('pd-private-tft-naive-nas-10', 20, 1.0, optim.gradient_ascent_minmax_reward,
                       optim.naive_gradient_ascent, grad, observable_seed=False, n_epochs=1000)
 
   # no_enforce = IPD_PG(payoffs1=no_enforce_payoffs_1, payoffs2=no_enforce_payoffs_2)
