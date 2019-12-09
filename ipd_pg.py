@@ -306,6 +306,10 @@ class PD_PGLearner(metaclass=ABCMeta):
     self.pr_DD_log = np.empty(n_epochs)
     self.payoffs1_log = np.empty(n_epochs)
     self.payoffs2_log = np.empty(n_epochs)
+    self.observed_action_probs1 = []
+    self.observed_action_probs2 = []
+    self.bargaining_action_probs1 = []
+    self.bargaining_action_probs2 = []
     self.reward_history = []
     self.action_history = []
     self.cooperative_likelihood_history = []
@@ -357,6 +361,8 @@ class PD_PGLearner(metaclass=ABCMeta):
       # Get actions from current policy
       if not (player_1_exploitable_ or player_2_exploitable_):  # If neither is exploitable, follow param policies
         a1, a2, p_a1, p_a2, ipw = self.actions_from_params(params1, params2, self.current_state[0], self.current_state[1])
+        self.observed_action_probs1.append(p_a1)
+        self.observed_action_probs2.append(p_a2)
       else:
         a1, a2, ipw = exploitability_policy(self.opponent_reward_estimates_2, self.opponent_reward_estimates_1,
                                             player_1_exploitable_, player_2_exploitable_)
@@ -473,24 +479,41 @@ class PD_PGLearner(metaclass=ABCMeta):
 
         p_a1_barg = bargaining_probs1[a1]
         p_a2_barg = bargaining_probs2[a2]
+        self.bargaining_action_probs1.append(p_a1_barg)
+        self.bargaining_action_probs2.append(p_a2_barg)
         self.cooperative_likelihood_history.append([p_a1_barg, p_a2_barg])
         LOOK_BACK = 40
         look_back = np.min((LOOK_BACK, i+1))
-        likelihood_coop_1 = np.prod(np.array(self.cooperative_likelihood_history)[no_punish_ixs_1[-look_back:-1], 0])
-        likelihood_coop_2 = np.prod(np.array(self.cooperative_likelihood_history)[no_punish_ixs_2[-look_back:-1], 1])
-        max_lik_stationary_1, max_lik_stationary_2 = self.maximum_likelihood(no_punish_ixs_1[-look_back:], no_punish_ixs_2[-look_back:])
+        likelihood_coop_1 = np.prod(np.array(self.cooperative_likelihood_history)[no_punish_ixs_2[-look_back:-1], 0])
+        likelihood_coop_2 = np.prod(np.array(self.cooperative_likelihood_history)[no_punish_ixs_1[-look_back:-1], 1])
+        max_lik_stationary_1, max_lik_stationary_2 = self.maximum_likelihood(no_punish_ixs_2[-look_back:], no_punish_ixs_1[-look_back:])
         TOL = 0.5
         if i > 50:
+          ratios_1 = []
+          ratios_2 = []
+          for b in range(100):
+            no_punish_ixs_1_b = np.random.choice(no_punish_ixs_1[-look_back], look_back)
+            no_punish_ixs_2_b = np.random.choice(no_punish_ixs_2[-look_back], look_back)
+            likelihood_coop_1_b = np.prod(np.array(self.cooperative_likelihood_history)[no_punish_ixs_2_b[:-1], 0])
+            likelihood_coop_2_b = np.prod(np.array(self.cooperative_likelihood_history)[no_punish_ixs_1_b[:-1], 1])
+            # ToDo: also need to pass indices of bootstrapped... indices to max_lik
+            max_lik_stationary_1_b, max_lik_stationary_2_b = self.maximum_likelihood(no_punish_ixs_2_b,
+                                                                                     no_punish_ixs_1_b)
+            ratios_1.append(max_lik_stationary_1_b / likelihood_coop_1)
+            ratios_2.append(max_lik_stationary_2_b / likelihood_coop_2)
+          pdb.set_trace()
           if i == 51:
             initial_defect_lik_1 = max_lik_stationary_1 / likelihood_coop_1
             initial_defect_lik_2 = max_lik_stationary_2 / likelihood_coop_2
           if max_lik_stationary_1 / likelihood_coop_1 >= 10.:
+            pdb.set_trace()
             self.defect1 = True
             defect_lik_1 = max_lik_stationary_1 /likelihood_coop_1
           else:
             self.defect1 = False
             no_punish_ixs_1.append(i+1)
           if max_lik_stationary_2 / likelihood_coop_2 >= 10.:
+            pdb.set_trace()
             self.defect2 = True
             defect_lik_2 = max_lik_stationary_2 / likelihood_coop_2
           else:
