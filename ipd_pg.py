@@ -417,7 +417,7 @@ class PD_PGLearner(metaclass=ABCMeta):
       def V(p1p2):
         p1, p2 = p1p2
         V1_, V2_ = self.payoffs(p1, p2, self.ipw_history, self.reward_history, self.action_history, self.state_history)
-        return (T.log(V1_ - d1 + 1.) + T.log(V2_ - d2 + 1.)).requires_grad_()
+        return (T.log(T.max(V1_ - d1, T.tensor(0.1))) + T.log(T.max(V2_ - d2, T.tensor(0.1)))).requires_grad_()
 
       def V1(p1p2):
         p1, p2 = p1p2
@@ -462,7 +462,7 @@ class PD_PGLearner(metaclass=ABCMeta):
       )
 
       # Compare to bargaining updates
-      bargaining_update1, bargaining_update2 = self.bargaining_updates(lr, params1, params2, bargaining_updater, V,
+      bargaining_update1, bargaining_update2 = self.bargaining_updates(lr, bargaining_params1, bargaining_params2, bargaining_updater, V,
                                                                          suboptimality_tolerance)
       if observable_seed:
         V_bargaining = V((bargaining_params1 + bargaining_update1, bargaining_params2 + bargaining_update2)).detach().numpy()
