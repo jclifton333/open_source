@@ -417,7 +417,7 @@ class PD_PGLearner(metaclass=ABCMeta):
       def V(p1p2):
         p1, p2 = p1p2
         V1_, V2_ = self.payoffs(p1, p2, self.ipw_history, self.reward_history, self.action_history, self.state_history)
-        return (T.log(V1_ - d1) + T.log(V2_ - d2)).requires_grad_()
+        return (T.log(V1_ - d1 + 1.) + T.log(V2_ - d2 + 1.)).requires_grad_()
 
       def V1(p1p2):
         p1, p2 = p1p2
