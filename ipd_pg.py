@@ -465,7 +465,7 @@ class PD_PGLearner(metaclass=ABCMeta):
       bargaining_update1, bargaining_update2 = self.bargaining_updates(lr, params1, params2, bargaining_updater, V,
                                                                          suboptimality_tolerance)
       if observable_seed:
-        V_bargaining = V((params1 + bargaining_update1, params2 + bargaining_update2)).detach().numpy()
+        V_bargaining = V((bargaining_params1 + bargaining_update1, bargaining_params2 + bargaining_update2)).detach().numpy()
 
         if np.abs(V_bargaining - V((params1 + bargaining_update1, params2 + update2)).detach().numpy()) \
                 < suboptimality_tolerance:
@@ -661,10 +661,10 @@ if __name__ == "__main__":
   ipd = IPD_PG(payoffs1=pd_payoffs1, payoffs2=pd_payoffs2)
   ipd.learn_multi_rep('pd-tft-nash-10', 20, 1.0, optim.gradient_ascent_minmax_reward,
                     optim.gradient_ascent_minmax_reward, grad, observable_seed=True, n_epochs=1000)
-  ipd.learn_multi_rep('pd-private-tft-nash-10', 20, 1.0, optim.gradient_ascent_minmax_reward,
-                    optim.gradient_ascent_minmax_reward, grad, observable_seed=False, n_epochs=1000)
-  ipd.learn_multi_rep('pd-private-tft-naive-nas-10', 20, 1.0, optim.gradient_ascent_minmax_reward,
-                      optim.naive_gradient_ascent, grad, observable_seed=False, n_epochs=1000)
+  # ipd.learn_multi_rep('pd-private-tft-nash-10', 20, 1.0, optim.gradient_ascent_minmax_reward,
+  #                   optim.gradient_ascent_minmax_reward, grad, observable_seed=False, n_epochs=1000)
+  # ipd.learn_multi_rep('pd-private-tft-naive-nas-10', 20, 1.0, optim.gradient_ascent_minmax_reward,
+  #                     optim.naive_gradient_ascent, grad, observable_seed=False, n_epochs=1000)
 
   # no_enforce = IPD_PG(payoffs1=no_enforce_payoffs_1, payoffs2=no_enforce_payoffs_2)
   # no_enforce.learn_multi_rep('game-2-with-ht', 20, 0.5, optim.gradient_ascent_minmax_reward,
