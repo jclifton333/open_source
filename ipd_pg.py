@@ -660,12 +660,12 @@ if __name__ == "__main__":
   stag_payoffs2 = np.array([[2., -3.], [0., 1.]])
 
   ipd = IPD_PG(payoffs1=pd_payoffs1, payoffs2=pd_payoffs2)
-  ipd.learn_multi_rep('pd-tft-nash', 20, 1.0, optim.gradient_ascent_minmax_reward,
+  ipd.learn_multi_rep('pd-tft-nash-mm-known', 20, 1.0, optim.gradient_ascent_minmax_reward,
                     optim.gradient_ascent_minmax_reward, grad, observable_seed=True, n_epochs=1000)
-  ipd.learn_multi_rep('pd-private-tft-nash-10', 20, 1.0, optim.gradient_ascent_minmax_reward,
-                    optim.gradient_ascent_minmax_reward, grad, observable_seed=False, n_epochs=1000)
-  ipd.learn_multi_rep('pd-private-tft-naive-nash-10', 20, 1.0, optim.gradient_ascent_minmax_reward,
-                      optim.naive_gradient_ascent, grad, observable_seed=False, n_epochs=1000)
+  # ipd.learn_multi_rep('pd-private-tft-nash-10', 20, 1.0, optim.gradient_ascent_minmax_reward,
+  #                   optim.gradient_ascent_minmax_reward, grad, observable_seed=False, n_epochs=1000)
+  # ipd.learn_multi_rep('pd-private-tft-naive-nash-10', 20, 1.0, optim.gradient_ascent_minmax_reward,
+  #                     optim.naive_gradient_ascent, grad, observable_seed=False, n_epochs=1000)
 
   # no_enforce = IPD_PG(payoffs1=no_enforce_payoffs_1, payoffs2=no_enforce_payoffs_2)
   # no_enforce.learn_multi_rep('game-2-with-ht', 20, 0.5, optim.gradient_ascent_minmax_reward,

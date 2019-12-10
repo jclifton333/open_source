@@ -122,7 +122,9 @@ def gradient_ascent_minmax_reward(V, V1, V2, params1, params2, lr, player, defec
   if defect:
     max_a1 = np.max((R_opponent(0, 0), R_opponent(1, 0)))
     max_a2 = np.max((R_opponent(0, 1), R_opponent(1, 1)))
-    a_punish = np.argmin((max_a1, max_a2))
+    # a_punish = np.argmin((max_a1, max_a2))
+    # ToDo: assuming minimax is known for testing purposes!
+    a_punish = 1
   else:
     a_punish = None
 
