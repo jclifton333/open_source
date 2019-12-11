@@ -238,8 +238,8 @@ class PD_PGLearner(metaclass=ABCMeta):
         step_list.append(np.arange(n_epochs))
         payoffs1.append(results['payoffs1'])
         payoffs2.append(results['payoffs2'])
-        cum_payoffs1.append(np.cumsum(np.array(results['payoffs1']) / np.arange(1, n_epochs+1)))
-        cum_payoffs2.append(np.cumsum(np.array(results['payoffs2']) / np.arange(1, n_epochs+1)))
+        cum_payoffs1.append(np.cumsum(np.array(results['payoffs1'])) / np.arange(1, n_epochs+1))
+        cum_payoffs2.append(np.cumsum(np.array(results['payoffs2'])) / np.arange(1, n_epochs+1))
 
     if plot_learning:
       # Get average values over each replicate
@@ -374,10 +374,6 @@ class PD_PGLearner(metaclass=ABCMeta):
                                             player_1_exploitable_, player_2_exploitable_)
 
       # Override actions with exploration or punishment
-      # if np.random.random() < 0.05:
-      #  a1 = np.random.choice(2)
-      # if np.random.random() < 0.05:
-      #   a2 = np.random.choice(2)
       if self.a_punish_1 is not None: # If decided to punish on the last turn, replace with punishment action
         a1 = self.a_punish_1
       if self.a_punish_2 is not None:
@@ -557,7 +553,7 @@ class PD_PGLearner(metaclass=ABCMeta):
                            'steps': np.hstack((self.step_list, self.step_list)),
                            'profile': np.hstack((['CC'] * len(self.step_list), ['DD'] * len(self.step_list))),
                            'payoffs': payoffs,
-                           'cum_payoffs': cum_payoffs,
+                           'cumulative_payoffs': cum_payoffs,
                            'player': np.hstack(
                              (['player 1'] * len(self.step_list), ['player 2'] * len(self.step_list)))}
         probs_series_df = pd.DataFrame(probs_series_df)
