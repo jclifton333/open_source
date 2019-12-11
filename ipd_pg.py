@@ -563,7 +563,7 @@ class PD_PGLearner(metaclass=ABCMeta):
         sns.lineplot(x='steps', y='payoffs', hue='player', data=probs_series_df, ax=axs[1])
 
         # Cumulative payoffs time series
-        sns.lineplot(x='steps', y='cum_payoffs', hue='player', data=probs_series_df, ax=axs[2])
+        sns.lineplot(x='steps', y='cumulative_payoffs', hue='player', data=probs_series_df, ax=axs[2])
 
         if label is not None: # save figure if filename given
           plt.savefig('{}.png'.format(label))
