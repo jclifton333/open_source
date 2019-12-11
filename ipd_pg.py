@@ -11,6 +11,7 @@ from torch.autograd import grad, set_detect_anomaly
 from random import uniform
 from functools import partial
 from scipy.special import expit, logit
+from scipy.stats import norm
 from abc import ABCMeta, abstractmethod
 import pdb
 import optim
@@ -287,7 +288,12 @@ class PD_PGLearner(metaclass=ABCMeta):
 
     max_lik_1 = np.power(p1_c, n_cc_1 - f_cc_1) * np.power(1-p1_c, f_cc_1) * np.power(p1_d, n_dc_1 - f_dc_1) * np.power(1-p1_d, f_dc_1)
     max_lik_2 = np.power(p2_c, n_cc_2 - f_cc_2) * np.power(1-p2_c, f_cc_2) * np.power(p2_d, n_dc_2 - f_dc_2) * np.power(1-p2_d, f_dc_2)
-    return max_lik_1, max_lik_2
+
+    # Variances
+    var_max_lik_1 = 2*(p1_c-p1_c**2)**3 * np.log(p1_c-p1_c**2)**2*n_cc_1 + 2*(p1_d-p1_d**2)**3 * np.log(p1_d-p1_d**2)**2*n_dc_1
+    var_max_lik_2 = 2*(p2_c-p2_c**2)**3 * np.log(p2_c-p2_c**2)**2*n_cc_2 + 2*(p2_d-p2_d**2)**3 * np.log(p2_d-p2_d**2)**2*n_dc_2
+
+    return max_lik_1, max_lik_2, var_max_lik_1, var_max_lik_2
 
   def learn(self,
             lr,
@@ -419,8 +425,8 @@ class PD_PGLearner(metaclass=ABCMeta):
       def V(p1p2):
         p1, p2 = p1p2
         V1_, V2_ = self.payoffs(p1, p2, self.ipw_history, self.reward_history, self.action_history, self.state_history)
-        return (T.log(T.max(V1_ - d1, T.tensor(0.001))) + T.log(T.max(V2_ - d2, T.tensor(0.001)))).requires_grad_()
-        # return (V1_ + V2_).requires_grad_()
+        # return (T.log(T.max(V1_ - d1, T.tensor(0.001))) + T.log(T.max(V2_ - d2, T.tensor(0.001)))).requires_grad_()
+        return (V1_ + V2_).requires_grad_()
 
       def V1(p1p2):
         p1, p2 = p1p2
@@ -488,11 +494,12 @@ class PD_PGLearner(metaclass=ABCMeta):
         self.bargaining_action_probs1.append(p_a1_barg)
         self.bargaining_action_probs2.append(p_a2_barg)
         self.cooperative_likelihood_history.append([p_a1_barg, p_a2_barg])
-        LOOK_BACK = 50
+        LOOK_BACK = i
         look_back = np.min((LOOK_BACK, i+1))
         likelihood_coop_1 = np.prod(np.array(self.cooperative_likelihood_history)[no_punish_ixs_2[-look_back:-1], 0])
         likelihood_coop_2 = np.prod(np.array(self.cooperative_likelihood_history)[no_punish_ixs_1[-look_back:-1], 1])
-        max_lik_stationary_1, max_lik_stationary_2 = self.maximum_likelihood(no_punish_ixs_2[-look_back:], no_punish_ixs_1[-look_back:])
+        max_lik_stationary_1, max_lik_stationary_2, max_lik_var_1, max_lik_var_2 = \
+          self.maximum_likelihood(no_punish_ixs_2[-look_back:], no_punish_ixs_1[-look_back:])
         TOL = 0.5
         if i > 50:
           # ratios_1 = []
@@ -510,13 +517,28 @@ class PD_PGLearner(metaclass=ABCMeta):
           if i == 51:
             initial_defect_lik_1 = max_lik_stationary_1 / likelihood_coop_1
             initial_defect_lik_2 = max_lik_stationary_2 / likelihood_coop_2
-          if np.log(max_lik_stationary_1)/len(no_punish_ixs_2) - np.log(likelihood_coop_1)/len(no_punish_ixs_2) >= 10 / (i - 50):
+
+          # Get p-values for likelihood hypothesis test
+          p_bar_1_arr = np.array(self.bargaining_action_probs1)[no_punish_ixs_2[:-1]]
+          pm_psq_1 = p_bar_1_arr - p_bar_1_arr**2
+          p_bar_2_arr = np.array(self.bargaining_action_probs2)[no_punish_ixs_1[:-1]]
+          pm_psq_2 = p_bar_2_arr - p_bar_2_arr**2
+          var_bar_sum_1 = np.sum(2*pm_psq_1**3 * np.log(pm_psq_1)**2)
+          var_bar_sum_2 = np.sum(2*pm_psq_2**3 * np.log(pm_psq_2)**2)
+          test_stat_1 = \
+            np.log(max_lik_stationary_1)/np.sqrt(2*max_lik_var_1) - np.log(likelihood_coop_1)/np.sqrt(2*var_bar_sum_1)
+          test_stat_2 = \
+            np.log(max_lik_stationary_2)/np.sqrt(2*max_lik_var_2) - np.log(likelihood_coop_2)/np.sqrt(2*var_bar_sum_2)
+          pval_1 = norm.cdf(1-test_stat_1)
+          pval_2 = norm.cdf(1-test_stat_2)
+          print('pval: {}'.format(pval_2))
+          if pval_1 < 0.05:
             self.defect1 = True
             defect_lik_1 = max_lik_stationary_1 /likelihood_coop_1
           else:
             self.defect1 = False
             no_punish_ixs_1.append(i+1)
-          if np.log(max_lik_stationary_2)/len(no_punish_ixs_1) - np.log(likelihood_coop_2)/len(no_punish_ixs_1) >= 10 / (i - 50):
+          if pval_2 < 0.05:
             self.defect2 = True
             defect_lik_2 = max_lik_stationary_2 / likelihood_coop_2
           else:
@@ -661,11 +683,11 @@ if __name__ == "__main__":
   stag_payoffs2 = np.array([[2., -3.], [0., 1.]])
 
   ipd = IPD_PG(payoffs1=pd_payoffs1, payoffs2=pd_payoffs2)
-  ipd.learn_multi_rep('pd-tft-nash-mm-known', 20, 1.0, optim.gradient_ascent_minmax_reward,
-                    optim.gradient_ascent_minmax_reward, grad, observable_seed=True, n_epochs=1000)
-  ipd.learn_multi_rep('pd-private-tft-nash-10-mm-known', 20, 1.0, optim.gradient_ascent_minmax_reward,
+  # ipd.learn_multi_rep('pd-tft-nash-mm-known', 20, 1.0, optim.gradient_ascent_minmax_reward,
+  #                   optim.gradient_ascent_minmax_reward, grad, observable_seed=True, n_epochs=1000)
+  ipd.learn_multi_rep('pd-private-tft-pval', 20, 1.0, optim.gradient_ascent_minmax_reward,
                     optim.gradient_ascent_minmax_reward, grad, observable_seed=False, n_epochs=1000)
-  ipd.learn_multi_rep('pd-private-tft-naive-nash-10-mm-known', 20, 1.0, optim.gradient_ascent_minmax_reward,
+  ipd.learn_multi_rep('pd-private-tft-naive-pval', 20, 1.0, optim.gradient_ascent_minmax_reward,
                       optim.naive_gradient_ascent, grad, observable_seed=False, n_epochs=1000)
 
   # no_enforce = IPD_PG(payoffs1=no_enforce_payoffs_1, payoffs2=no_enforce_payoffs_2)
