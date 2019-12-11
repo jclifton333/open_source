@@ -211,6 +211,8 @@ class PD_PGLearner(metaclass=ABCMeta):
     payoffs1 = []
     payoffs2 = []
     step_list = []
+    cum_payoffs1 = []
+    cum_payoffs2 = []
     for rep in range(n_rep):
       results = self.learn(lr,
                           updater1,
@@ -236,6 +238,8 @@ class PD_PGLearner(metaclass=ABCMeta):
         step_list.append(np.arange(n_epochs))
         payoffs1.append(results['payoffs1'])
         payoffs2.append(results['payoffs2'])
+        cum_payoffs1.append(np.cumsum(np.array(results['payoffs1']) / np.arange(1, n_epochs+1)))
+        cum_payoffs2.append(np.cumsum(np.array(results['payoffs2']) / np.arange(1, n_epochs+1)))
 
     if plot_learning:
       # Get average values over each replicate
@@ -246,6 +250,8 @@ class PD_PGLearner(metaclass=ABCMeta):
       self.step_list = np.hstack(step_list)
       self.payoffs1_log = np.hstack(payoffs1)
       self.payoffs2_log = np.hstack(payoffs2)
+      self.cum_payoffs1 = np.hstack(cum_payoffs1)
+      self.cum_payoffs2 = np.hstack(cum_payoffs2)
 
       # Plot
       self.plot_last_learning(label, multi_rep=True)
@@ -546,13 +552,12 @@ class PD_PGLearner(metaclass=ABCMeta):
         # Plot prob time series
         fig, axs = plt.subplots(nrows=3)
         payoffs = np.hstack((self.payoffs1_log, self.payoffs2_log))
+        cum_payoffs = np.hstack((self.cum_payoffs1, self.cum_payoffs2))
         probs_series_df = {'prob': np.hstack((self.pr_CC_log, self.pr_DD_log)),
                            'steps': np.hstack((self.step_list, self.step_list)),
                            'profile': np.hstack((['CC'] * len(self.step_list), ['DD'] * len(self.step_list))),
                            'payoffs': payoffs,
-                           'cum_payoffs': np.hstack((np.cumsum(self.payoffs1_log) / np.arange(1, len(self.payoffs1_log)+1),
-                                                     np.cumsum(self.payoffs2_log) / np.arange(1, len(self.payoffs2_log)+1))),
-
+                           'cum_payoffs': cum_payoffs,
                            'player': np.hstack(
                              (['player 1'] * len(self.step_list), ['player 2'] * len(self.step_list)))}
         probs_series_df = pd.DataFrame(probs_series_df)
@@ -661,11 +666,11 @@ if __name__ == "__main__":
 
   ipd = IPD_PG(payoffs1=pd_payoffs1, payoffs2=pd_payoffs2)
   ipd.learn_multi_rep('pd-tft-nash-mm-known', 20, 1.0, optim.gradient_ascent_minmax_reward,
-                    optim.gradient_ascent_minmax_reward, grad, observable_seed=True, n_epochs=5000)
-  ipd.learn_multi_rep('pd-private-tft-nash-10', 20, 1.0, optim.gradient_ascent_minmax_reward,
-                    optim.gradient_ascent_minmax_reward, grad, observable_seed=False, n_epochs=5000)
-  ipd.learn_multi_rep('pd-private-tft-naive-nash-10', 20, 1.0, optim.gradient_ascent_minmax_reward,
-                      optim.naive_gradient_ascent, grad, observable_seed=False, n_epochs=5000)
+                    optim.gradient_ascent_minmax_reward, grad, observable_seed=True, n_epochs=1000)
+  ipd.learn_multi_rep('pd-private-tft-nash-10-mm-known', 20, 1.0, optim.gradient_ascent_minmax_reward,
+                    optim.gradient_ascent_minmax_reward, grad, observable_seed=False, n_epochs=1000)
+  ipd.learn_multi_rep('pd-private-tft-naive-nash-10-mm-known', 20, 1.0, optim.gradient_ascent_minmax_reward,
+                      optim.naive_gradient_ascent, grad, observable_seed=False, n_epochs=1000)
 
   # no_enforce = IPD_PG(payoffs1=no_enforce_payoffs_1, payoffs2=no_enforce_payoffs_2)
   # no_enforce.learn_multi_rep('game-2-with-ht', 20, 0.5, optim.gradient_ascent_minmax_reward,
