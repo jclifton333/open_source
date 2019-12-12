@@ -280,6 +280,7 @@ class LolaLearner(metaclass=ABCMeta):
             'payoffs2': self.payoffs2_log}
 
   def learn_multi_rep(self,
+                      label,
                       n_rep,
                       lr,
                       lola1=True,
@@ -336,9 +337,9 @@ class LolaLearner(metaclass=ABCMeta):
           self.payoffs2_log = np.hstack(payoffs2)
 
         # Plot
-        self.plot_last_learning(multi_rep=True)
+        self.plot_last_learning(label, multi_rep=True)
 
-  def plot_last_learning(self, multi_rep):
+  def plot_last_learning(self, label, multi_rep):
     if self.pr_CC_log is not None:
       if multi_rep:
         # Plot prob time series
@@ -353,7 +354,10 @@ class LolaLearner(metaclass=ABCMeta):
 
         # Plot payoffs time series
         sns.lineplot(x='steps', y='payoffs', hue='player', data=probs_series_df, ax=axs[1])
-        plt.show()
+        if label is not None: # save figure if filename given
+          plt.savefig('{}.png'.format(label))
+        else:
+          plt.show()
       else:
         steps = np.arange(len(self.pr_CC_log))
         fig, axs = plt.subplots(nrows=2, ncols=1, sharex=True)
@@ -396,5 +400,12 @@ class IteratedLola(LolaLearner):
 if __name__ == "__main__":
   stag_payoffs1 = [2., -3., 1., 1.]
   stag_payoffs2 = [2., 1., -3., 1.]
+  pd_payoffs1 = [-1., -3., 0., -2.]
+  pd_payoffs2 = [-1., 0., -3, -2.]
   istag = IteratedLola(payoffs1=stag_payoffs1, payoffs2=stag_payoffs2)
-  istag.learn_multi_rep(n_rep=20,lr=1.,n_epochs=200, std=1.0)
+  istag.learn_multi_rep('stag-lola-lr=1', n_rep=20,lr=1.,n_epochs=1000, std=1.0)
+  istag.learn_multi_rep('stag-lola-lr=10', n_rep=20, lr=10., n_epochs=1000, std=1.0)
+  ipd = IteratedLola(payoffs1=pd_payoffs1,payoffs2=pd_payoffs2)
+  ipd.learn_multi_rep('ipd-lola-lr=1', n_rep=20,lr=1.,n_epochs=1000, std=1.0)
+  ipd.learn_multi_rep('ipd-lola-lr=10', n_rep=20, lr=10., n_epochs=1000, std=1.0)
+
