@@ -367,6 +367,8 @@ class PD_PGLearner(metaclass=ABCMeta):
     bargaining_probs1 = bargaining_probs2 = [0.5, 0.5]
     no_punish_ixs_1 = [0]
     no_punish_ixs_2 = [0]
+    pvals_1 = []  
+    pvals_2 = []
     for i in range(n_epochs):
       print(i)
 
@@ -531,14 +533,16 @@ class PD_PGLearner(metaclass=ABCMeta):
             np.log(max_lik_stationary_2)/np.sqrt(2*max_lik_var_2) - np.log(likelihood_coop_2)/np.sqrt(2*var_bar_sum_2)
           pval_1 = norm.cdf(1-test_stat_1)
           pval_2 = norm.cdf(1-test_stat_2)
+          pvals_1.append(pval_1)
+          pvals_2.append(pval_2)
           print('pval1: {} pval2: {}'.format(pval_1, pval_2))
-          if pval_1 < 0.05:
+          if pval_1 <= 0.001:
             self.defect1 = True
             defect_lik_1 = max_lik_stationary_1 /likelihood_coop_1
           else:
             self.defect1 = False
             no_punish_ixs_1.append(i+1)
-          if pval_2 < 0.05:
+          if pval_2 < 0.001: 
             self.defect2 = True
             defect_lik_2 = max_lik_stationary_2 / likelihood_coop_2
           else:
@@ -685,7 +689,7 @@ if __name__ == "__main__":
   ipd = IPD_PG(payoffs1=pd_payoffs1, payoffs2=pd_payoffs2)
   # ipd.learn_multi_rep('pd-tft-nash-mm-known', 20, 1.0, optim.gradient_ascent_minmax_reward,
   #                   optim.gradient_ascent_minmax_reward, grad, observable_seed=True, n_epochs=1000)
-  ipd.learn_multi_rep('pd-private-tft-pval', 50, 1.0, optim.gradient_ascent_minmax_reward,
+  ipd.learn_multi_rep('pd-private-tft-pval', 20, 1.0, optim.gradient_ascent_minmax_reward,
                     optim.gradient_ascent_minmax_reward, grad, observable_seed=False, n_epochs=1000)
   # ipd.learn_multi_rep('pd-private-tft-naive-pval', 20, 1.0, optim.gradient_ascent_minmax_reward,
   #                     optim.naive_gradient_ascent, grad, observable_seed=False, n_epochs=1000)
