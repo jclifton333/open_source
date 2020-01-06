@@ -709,8 +709,10 @@ if __name__ == "__main__":
   ipd = IPD_PG(payoffs1=pd_payoffs1, payoffs2=pd_payoffs2)
   # ipd.learn_multi_rep('pd-tft-nash-mm-known', 20, 1.0, optim.gradient_ascent_minmax_reward,
   #                   optim.gradient_ascent_minmax_reward, grad, observable_seed=True, n_epochs=1000)
-  ipd.learn_multi_rep('pd-tft-reinforce', 5, 0.1, optim.gradient_ascent_minmax_reward,
-                    optim.gradient_ascent_minmax_reward, grad, observable_seed=True, n_epochs=500)
+  ipd.learn_multi_rep('pd-tft-reinforce-1', 20, 1, optim.gradient_ascent_minmax_reward,
+                      optim.gradient_ascent_minmax_reward, grad, observable_seed=True, n_epochs=1000)
+  ipd.learn_multi_rep('pd-tft-reinforce-0.1', 20, 0.1, optim.gradient_ascent_minmax_reward,
+                    optim.gradient_ascent_minmax_reward, grad, observable_seed=True, n_epochs=1000)
   # ipd.learn_multi_rep('pd-private-tft-naive-pval', 20, 1.0, optim.gradient_ascent_minmax_reward,
   #                     optim.naive_gradient_ascent, grad, observable_seed=False, n_epochs=1000)
 
