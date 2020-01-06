@@ -386,6 +386,16 @@ class PD_PGLearner(metaclass=ABCMeta):
         a1 = self.a_punish_1
       if self.a_punish_2 is not None:
         a2 = self.a_punish_2
+      if np.random.uniform() < 0.1:
+        a1 = 1 - a1
+        p_a1 = 0.1
+      else:
+        p_a1 *= 0.9
+      if np.random.uniform() < 0.1:
+        a2 = 1 - a2
+        p_a2 = 0.1
+      else:
+        p_a2 *= 0.9
 
       # Observe rewards
       r1, r2 = self.outcomes(a1, a2)
@@ -394,7 +404,7 @@ class PD_PGLearner(metaclass=ABCMeta):
       self.state_history.append(self.current_state)
       self.reward_history.append((r1, r2))
       self.action_history.append((a1, a2))
-      self.ipw_history.append(ipw)
+      self.ipw_history.append(1 / (p_a1*p_a2))
       self.opponent_reward_estimate_counts_1[a2, a1] += 1
       self.opponent_reward_estimate_counts_2[a1, a2] += 1
       self.opponent_reward_estimates_1[a2, a1] += (r2 - self.opponent_reward_estimates_1[a2, a1]) / \
@@ -422,13 +432,14 @@ class PD_PGLearner(metaclass=ABCMeta):
       # Define bargaining value function estimator
       # V1, V2 = self.payoffs(params1, params2, ipw_history, reward_history, action_history, state_history)
       # Get disagreement points
-      d1 = np.max(self.opponent_reward_estimates_2[:, 1])
-      d2 = np.max(self.opponent_reward_estimates_1[:, 1])
+      d1 = self.opponent_reward_estimates_1[1, 1]
+      d2 = self.opponent_reward_estimates_2[1, 1]
+
       def V(p1p2):
         p1, p2 = p1p2
         V1_, V2_ = self.payoffs(p1, p2, self.ipw_history, self.reward_history, self.action_history, self.state_history)
-        # return (T.log(T.max(V1_ - d1, T.tensor(0.001))) + T.log(T.max(V2_ - d2, T.tensor(0.001)))).requires_grad_()
-        return (V1_ + V2_).requires_grad_()
+        return (T.log(T.max(V1_ - d1, T.tensor(0.001))) + T.log(T.max(V2_ - d2, T.tensor(0.001)))).requires_grad_()
+        # return (V1_ + V2_).requires_grad_()
 
       def V1(p1p2):
         p1, p2 = p1p2
@@ -471,7 +482,7 @@ class PD_PGLearner(metaclass=ABCMeta):
         R_opponent_1,
         R_opponent_2
       )
-
+      print('estimated value: {}'.format(V((params1, params2))))
       # Compare to bargaining updates
       bargaining_update1, bargaining_update2 = self.bargaining_updates(lr, bargaining_params1, bargaining_params2, bargaining_updater, V,
                                                                          suboptimality_tolerance)
@@ -639,8 +650,13 @@ class IPD_PG(PD_PGLearner):
       params1 = T.from_numpy(params1).float()
       params2 = T.from_numpy(params2).float()
 
-    probs1 = T.sigmoid(params1)
-    probs2 = T.sigmoid(params2)
+    probs10 = T.sigmoid(params1[0:2])
+    probs11 = T.sigmoid(params1[2:])
+    probs1 = T.cat((probs10 / T.sum(probs10), probs11 / T.sum(probs11)))
+
+    probs20 = T.sigmoid(params2[0:2])
+    probs21 = T.sigmoid(params2[2:])
+    probs2 = T.cat((probs20 / T.sum(probs20), probs21 / T.sum(probs21)))
 
     if exact:
       P = T.stack([
@@ -658,7 +674,8 @@ class IPD_PG(PD_PGLearner):
       value_estimate_1 = 0.
       value_estimate_2 = 0.
       is_normalizer = 0. # For stability
-      look_back = np.max((0, len(ipw_history) - 10))
+      look_back = np.max((0, len(ipw_history)-10))
+      log_prob_sum = 0.
       for ipw, r, a, s in zip(ipw_history[look_back:], reward_history[look_back:], action_history[look_back:],
                               state_history[look_back:]):
         # Get prob of a under probs1, probs2
@@ -667,7 +684,8 @@ class IPD_PG(PD_PGLearner):
         a1, a2 = a
         prob_a1 = probs1[(s1 + a1)*(1-s1) + (s1 + a1 + 1)*s1]
         prob_a2 = probs2[(s2 + a2)*(1-s2) + (s2 + a2 + 1)*s2]
-        prob_a = prob_a1 * prob_a2
+        prob_a = prob_a1 * prob_a2 * ipw
+        log_prob_sum += T.log(prob_a1 + 0.1) + T.log(prob_a2 + 0.1)
 
         # Update value estimate
         is_weight = prob_a / ipw
@@ -675,7 +693,9 @@ class IPD_PG(PD_PGLearner):
         value_estimate_1 += is_weight * r[0]
         value_estimate_2 += is_weight * r[1]
 
-      return value_estimate_1 / is_normalizer, value_estimate_2 / is_normalizer
+      value_estimate_1 /= is_normalizer
+      value_estimate_2 /= is_normalizer
+      return value_estimate_1, value_estimate_2
 
 
 if __name__ == "__main__":
@@ -689,8 +709,8 @@ if __name__ == "__main__":
   ipd = IPD_PG(payoffs1=pd_payoffs1, payoffs2=pd_payoffs2)
   # ipd.learn_multi_rep('pd-tft-nash-mm-known', 20, 1.0, optim.gradient_ascent_minmax_reward,
   #                   optim.gradient_ascent_minmax_reward, grad, observable_seed=True, n_epochs=1000)
-  ipd.learn_multi_rep('pd-private-tft-pval', 20, 1.0, optim.gradient_ascent_minmax_reward,
-                    optim.gradient_ascent_minmax_reward, grad, observable_seed=False, n_epochs=1000)
+  ipd.learn_multi_rep('pd-tft-reinforce', 5, 0.1, optim.gradient_ascent_minmax_reward,
+                    optim.gradient_ascent_minmax_reward, grad, observable_seed=True, n_epochs=500)
   # ipd.learn_multi_rep('pd-private-tft-naive-pval', 20, 1.0, optim.gradient_ascent_minmax_reward,
   #                     optim.naive_gradient_ascent, grad, observable_seed=False, n_epochs=1000)
 
