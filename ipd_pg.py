@@ -204,6 +204,7 @@ class PD_PGLearner(metaclass=ABCMeta):
                       hypothesis_test=False,
                       observable_seed=True,
                       cutoff=0.1,
+                      pval_cutoff=0.001,
                       exploitability_policy=None, # Must be supplied if hypothesis_test=True
                       **kwargs,  # these are forwarded to the parameters-to-outcomes function
                       ):
@@ -229,6 +230,7 @@ class PD_PGLearner(metaclass=ABCMeta):
                           suboptimality_tolerance=suboptimality_tolerance,
                           hypothesis_test=hypothesis_test,
                           observable_seed=observable_seed,
+                          pval_cutoff=pval_cutoff,
                           cutoff=cutoff,
                           exploitability_policy=exploitability_policy, # Must be supplied if hypothesis_test=True
                           **kwargs  # these are forwarded to the parameters-to-outcomes function
@@ -307,6 +309,7 @@ class PD_PGLearner(metaclass=ABCMeta):
             init_params1=None,
             init_params2=None,
             plot_learning=True,
+            pval_cutoff=0.001,
             suboptimality_tolerance=0.1,
             hypothesis_test=False,
             exploitability_policy=None, # Must be supplied if hypothesis_test=True,
@@ -438,8 +441,8 @@ class PD_PGLearner(metaclass=ABCMeta):
       def V(p1p2):
         p1, p2 = p1p2
         V1_, V2_ = self.payoffs(p1, p2, self.ipw_history, self.reward_history, self.action_history, self.state_history)
-        return (T.log(T.max(V1_ - d1, T.tensor(0.001))) + T.log(T.max(V2_ - d2, T.tensor(0.001)))).requires_grad_()
-        # return (V1_ + V2_).requires_grad_()
+        # return (T.log(T.max(V1_ - d1, T.tensor(0.001))) + T.log(T.max(V2_ - d2, T.tensor(0.001)))).requires_grad_()
+        return (V1_ + V2_).requires_grad_()
 
       def V1(p1p2):
         p1, p2 = p1p2
@@ -547,13 +550,13 @@ class PD_PGLearner(metaclass=ABCMeta):
           pvals_1.append(pval_1)
           pvals_2.append(pval_2)
           print('pval1: {} pval2: {}'.format(pval_1, pval_2))
-          if pval_1 <= 0.001:
+          if pval_1 <= pval_cutoff:
             self.defect1 = True
             defect_lik_1 = max_lik_stationary_1 /likelihood_coop_1
           else:
             self.defect1 = False
             no_punish_ixs_1.append(i+1)
-          if pval_2 < 0.001: 
+          if pval_2 < pval_cutoff:
             self.defect2 = True
             defect_lik_2 = max_lik_stationary_2 / likelihood_coop_2
           else:
@@ -709,10 +712,12 @@ if __name__ == "__main__":
   ipd = IPD_PG(payoffs1=pd_payoffs1, payoffs2=pd_payoffs2)
   # ipd.learn_multi_rep('pd-tft-nash-mm-known', 20, 1.0, optim.gradient_ascent_minmax_reward,
   #                   optim.gradient_ascent_minmax_reward, grad, observable_seed=True, n_epochs=1000)
-  ipd.learn_multi_rep('pd-tft-reinforce-1', 20, 1, optim.gradient_ascent_minmax_reward,
-                      optim.gradient_ascent_minmax_reward, grad, observable_seed=True, n_epochs=1000)
-  ipd.learn_multi_rep('pd-tft-reinforce-0.1', 20, 0.1, optim.gradient_ascent_minmax_reward,
-                    optim.gradient_ascent_minmax_reward, grad, observable_seed=True, n_epochs=1000)
+  ipd.learn_multi_rep('pd-tft-reinforce-1-cutoff=0.1', 20, 1, optim.gradient_ascent_minmax_reward,
+                      optim.gradient_ascent_minmax_reward, grad, observable_seed=False, n_epochs=1000,
+                      pval_cutoff=0.1)
+  ipd.learn_multi_rep('pd-tft-reinforce-1-cutoff=0.01', 20, 1, optim.gradient_ascent_minmax_reward,
+                      optim.gradient_ascent_minmax_reward, grad, observable_seed=False, n_epochs=1000,
+                      pval_cutoff=0.01)
   # ipd.learn_multi_rep('pd-private-tft-naive-pval', 20, 1.0, optim.gradient_ascent_minmax_reward,
   #                     optim.naive_gradient_ascent, grad, observable_seed=False, n_epochs=1000)
 
