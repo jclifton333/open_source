@@ -568,7 +568,9 @@ class PD_PGLearner(metaclass=ABCMeta):
         bargaining_probs1 = T.sigmoid((bargaining_params1 + bargaining_update1)[(2 * a2):(2 * a2 + 2)]).detach().numpy()
         bargaining_probs2 = T.sigmoid((bargaining_params2 + bargaining_update2)[(2 * a1):(2 * a1 + 2)]).detach().numpy()
         bargaining_probs1 /= np.sum(bargaining_probs1)
+        bargaining_probs1 = 0.9 * bargaining_probs1 + 0.1
         bargaining_probs2 /= np.sum(bargaining_probs2)
+        bargaining_probs2 = 0.9 * bargaining_probs2 + 0.1
 
       # Do updates
       params1.data += update1
@@ -718,6 +720,9 @@ if __name__ == "__main__":
   ipd.learn_multi_rep('pd-tft-reinforce-1-cutoff=0.01', 20, 1, optim.gradient_ascent_minmax_reward,
                       optim.gradient_ascent_minmax_reward, grad, observable_seed=False, n_epochs=1000,
                       pval_cutoff=0.01)
+  ipd.learn_multi_rep('pd-tft-reinforce-1-cutoff=0.001', 20, 1, optim.gradient_ascent_minmax_reward,
+                      optim.gradient_ascent_minmax_reward, grad, observable_seed=False, n_epochs=1000,
+                      pval_cutoff=0.001)
   # ipd.learn_multi_rep('pd-private-tft-naive-pval', 20, 1.0, optim.gradient_ascent_minmax_reward,
   #                     optim.naive_gradient_ascent, grad, observable_seed=False, n_epochs=1000)
 
