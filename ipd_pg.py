@@ -510,7 +510,7 @@ class PD_PGLearner(metaclass=ABCMeta):
         self.bargaining_action_probs1.append(p_a1_barg)
         self.bargaining_action_probs2.append(p_a2_barg)
         self.cooperative_likelihood_history.append([p_a1_barg, p_a2_barg])
-        LOOK_BACK = i
+        LOOK_BACK = 20
         look_back = np.min((LOOK_BACK, i+1))
         likelihood_coop_1 = np.prod(np.array(self.cooperative_likelihood_history)[no_punish_ixs_2[-look_back:-1], 0])
         likelihood_coop_2 = np.prod(np.array(self.cooperative_likelihood_history)[no_punish_ixs_1[-look_back:-1], 1])
