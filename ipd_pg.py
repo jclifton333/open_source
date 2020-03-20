@@ -510,7 +510,7 @@ class PD_PGLearner(metaclass=ABCMeta):
         self.bargaining_action_probs1.append(p_a1_barg)
         self.bargaining_action_probs2.append(p_a2_barg)
         self.cooperative_likelihood_history.append([p_a1_barg, p_a2_barg])
-        LOOK_BACK = 20
+        LOOK_BACK = i
         look_back = np.min((LOOK_BACK, i+1))
         likelihood_coop_1 = np.prod(np.array(self.cooperative_likelihood_history)[no_punish_ixs_2[-look_back:-1], 0])
         likelihood_coop_2 = np.prod(np.array(self.cooperative_likelihood_history)[no_punish_ixs_1[-look_back:-1], 1])
@@ -712,19 +712,18 @@ if __name__ == "__main__":
   stag_payoffs2 = np.array([[2., -3.], [0., 1.]])
 
   ipd = IPD_PG(payoffs1=pd_payoffs1, payoffs2=pd_payoffs2)
-  # ipd.learn_multi_rep('pd-tft-nash-mm-known', 20, 1.0, optim.gradient_ascent_minmax_reward,
-  #                   optim.gradient_ascent_minmax_reward, grad, observable_seed=True, n_epochs=1000)
-  ipd.learn_multi_rep('pd-tft-reinforce-1-cutoff=0.1', 20, 1, optim.gradient_ascent_minmax_reward,
+  ipd.learn_multi_rep('pd-vs-naive-0.001', 20, 1, optim.gradient_ascent_minmax_reward,
+                      optim.naive_gradient_ascent, grad, observable_seed=False, n_epochs=1000,
+                      pval_cutoff=0.001)
+  ipd.learn_multi_rep('pd-private-0.1', 20, 1, optim.gradient_ascent_minmax_reward,
                       optim.gradient_ascent_minmax_reward, grad, observable_seed=False, n_epochs=1000,
                       pval_cutoff=0.1)
-  ipd.learn_multi_rep('pd-tft-reinforce-1-cutoff=0.01', 20, 1, optim.gradient_ascent_minmax_reward,
+  ipd.learn_multi_rep('pd-private-0.01', 20, 1, optim.gradient_ascent_minmax_reward,
                       optim.gradient_ascent_minmax_reward, grad, observable_seed=False, n_epochs=1000,
                       pval_cutoff=0.01)
-  ipd.learn_multi_rep('pd-tft-reinforce-1-cutoff=0.001', 20, 1, optim.gradient_ascent_minmax_reward,
+  ipd.learn_multi_rep('pd-private-0.001', 20, 1, optim.gradient_ascent_minmax_reward,
                       optim.gradient_ascent_minmax_reward, grad, observable_seed=False, n_epochs=1000,
                       pval_cutoff=0.001)
-  # ipd.learn_multi_rep('pd-private-tft-naive-pval', 20, 1.0, optim.gradient_ascent_minmax_reward,
-  #                     optim.naive_gradient_ascent, grad, observable_seed=False, n_epochs=1000)
 
   # no_enforce = IPD_PG(payoffs1=no_enforce_payoffs_1, payoffs2=no_enforce_payoffs_2)
   # no_enforce.learn_multi_rep('game-2-with-ht', 20, 0.5, optim.gradient_ascent_minmax_reward,
