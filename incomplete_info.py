@@ -80,7 +80,7 @@ def generate_choice_experiments(true_payoffs, n):
   for rep in range(n):
     probs1 = np.random.dirichlet(np.ones(4))
     probs2 = np.random.dirichlet(np.ones(4))
-    choice = np.dot(true_payoffs, probs1) > np.dot(true_payoffs, probs2)
+    choice = np.dot(true_payoffs.flatten(), probs1) > np.dot(true_payoffs.flatten(), probs2)
     probs_and_choices.append((probs1, probs2, choice))
   return probs_and_choices
 
@@ -119,6 +119,7 @@ def interactions(payoffs1, payoffs2, policy1, policy2, n_interactions):
     else:
       s2 = 1
       punish2 = True
+    pdb.set_trace()
   total_payoffs1 = np.sum(payoffs1_list)
   total_payoffs2 = np.sum(payoffs2_list)
   return total_payoffs1, total_payoffs2
@@ -187,7 +188,15 @@ def episode(payoffs1, payoffs2, interaction_policy1, interaction_policy2, n_choi
   policy2 = lambda s: interaction_policy2(s, estimated_payoffs_12, estimated_payoffs_22, 1)
   total_payoffs1, total_payoffs2 = interactions(payoffs1, payoffs2, policy1, policy2, n_interactions)
 
+  # ToDo: add payoffs from choice experiments
   return total_payoffs1, total_payoffs2
+
+
+if __name__ == "__main__":
+  pd_payoffs1 = np.array([[-1., -3.], [0., -2.]])
+  pd_payoffs2 = np.array([[-1., -3.], [0., -2.]])
+  print(episode(pd_payoffs1, pd_payoffs2, max_lik_tft_policy, max_lik_tft_policy, 5, 5, 1., 2.))
+
 
 
 
