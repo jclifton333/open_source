@@ -100,6 +100,8 @@ def interactions(payoffs1, payoffs2, policy1, policy2, n_interactions):
   payoffs2_list = []
   s1 = 0  # Coding cooperation as 0 and defection as 1
   s2 = 0
+  punish1 = False
+  punish2 = False
   for rep in range(n_interactions):
     a1, m1, c1 = policy1(s1)  # Policies should return their mixed strategy (m1) and the mixed strat they deem cooperative (c1)
     a2, m2, c2 = policy2(s2)
@@ -107,14 +109,16 @@ def interactions(payoffs1, payoffs2, policy1, policy2, n_interactions):
     r2 = payoffs2[a1, a2]
     payoffs1_list.append(r1)
     payoffs2_list.append(r2)
-    if m2 == c1:
+    if m2 == c1 or punish2:  # Don't count defections when there's a punishment happening
       s1 = 0
     else:
       s1 = 1
-    if m1 == c2:
+      punish1 = True
+    if m1 == c2 or punish1:
       s2 = 0
     else:
       s2 = 1
+      punish2 = True
   total_payoffs1 = np.sum(payoffs1_list)
   total_payoffs2 = np.sum(payoffs2_list)
   return total_payoffs1, total_payoffs2
@@ -140,7 +144,31 @@ def max_lik_cooperative_policy(estimated_payoffs1, estimated_payoffs2, player_ix
 
 
 def max_lik_punishment_policy(estimated_payoffs1, estimated_payoffs2, player_ix):
-  pass
+  if player_ix == 0:
+    estimated_payoffs_mi = estimated_payoffs2
+    max_axis = 0  # ToDo: check this, brain is farting
+  else:
+    estimated_payoffs_mi = estimated_payoffs1
+    max_axis = 1
+  max_mi = np.max(estimated_payoffs_mi, axis=max_axis)
+  min_max_action = np.argmax(max_mi)
+  return min_max_action
+
+
+def max_lik_tft_policy(s, estimated_payoffs1, estimated_payoffs2, player_ix):
+  """
+  
+  :param s: 0 for counterpart cooperated on previous turn, 1 for defect
+  :param estimated_payoffs1: 
+  :param estimated_payoffs2: 
+  :return: 
+  """
+  a_coop, aj, cj = max_lik_cooperative_policy(estimated_payoffs1, estimated_payoffs2, player_ix)
+  if s:
+    ai = max_lik_punishment_policy(estimated_payoffs1, estimated_payoffs2, player_ix)
+  else:
+    ai = a_coop
+  return ai, aj, cj
 
 
 def episode(payoffs1, payoffs2, interaction_policy1, interaction_policy2, n_choice_experiments, n_interactions,
@@ -154,7 +182,12 @@ def episode(payoffs1, payoffs2, interaction_policy1, interaction_policy2, n_choi
   estimated_payoffs_12 = maximize_likelihood(probs_and_choices1, temp=temp2)
   estimated_payoffs_22 = maximize_likelihood(probs_and_choices2, temp=temp2)
 
-  return
+  # Fix interaction policies and run interaction phase
+  policy1 = lambda s: interaction_policy1(s, estimated_payoffs_11, estimated_payoffs_21, 0)
+  policy2 = lambda s: interaction_policy2(s, estimated_payoffs_12, estimated_payoffs_22, 1)
+  total_payoffs1, total_payoffs2 = interactions(payoffs1, payoffs2, policy1, policy2, n_interactions)
+
+  return total_payoffs1, total_payoffs2
 
 
 
