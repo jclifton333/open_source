@@ -38,7 +38,7 @@ def single_choice_likelihood(probs1, probs2, choice, payoffs, temp=1.):
   return -np.log((1-choice)*p1_boltzmann + choice*(1-p1_boltzmann))
 
 
-def choice_likelihood(probs_and_choices, temp=1.):
+def choice_likelihood(probs_and_choices, temp=1., penalty=1.):
   """
 
   :param probs_and_choices: List of tuples (probs1, probs2, choice)
@@ -49,7 +49,7 @@ def choice_likelihood(probs_and_choices, temp=1.):
     log_lik_ = 0.
     for probs1, probs2, choice in probs_and_choices:
       log_lik_ += single_choice_likelihood(probs1, probs2, choice, payoffs, temp=temp)
-    return log_lik_
+    return log_lik_ + penalty*np.dot(payoffs, payoffs)
   return log_lik
 
 
@@ -73,6 +73,94 @@ def max_lik_welfare(probs_and_choices_1, probs_and_choices_2, temp1=1., temp2=1.
         best_act = (a1, a2)
         best_welfare = welfare
   return best_act
+
+
+def generate_choice_experiments(true_payoffs, n):
+  probs_and_choices = []
+  for rep in range(n):
+    probs1 = np.random.dirichlet(np.ones(4))
+    probs2 = np.random.dirichlet(np.ones(4))
+    choice = np.dot(true_payoffs, probs1) > np.dot(true_payoffs, probs2)
+    probs_and_choices.append((probs1, probs2, choice))
+  return probs_and_choices
+
+
+def interactions(payoffs1, payoffs2, policy1, policy2, n_interactions):
+  """
+  Memory-1 policies.
+
+  :param payoffs1:
+  :param payoffs2:
+  :param policy1:
+  :param policy2:
+  :param num_interactions:
+  :return:
+  """
+  payoffs1_list = []
+  payoffs2_list = []
+  s1 = 0  # Coding cooperation as 0 and defection as 1
+  s2 = 0
+  for rep in range(n_interactions):
+    a1, m1, c1 = policy1(s1)  # Policies should return their mixed strategy (m1) and the mixed strat they deem cooperative (c1)
+    a2, m2, c2 = policy2(s2)
+    r1 = payoffs1[a1, a2]
+    r2 = payoffs2[a1, a2]
+    payoffs1_list.append(r1)
+    payoffs2_list.append(r2)
+    if m2 == c1:
+      s1 = 0
+    else:
+      s1 = 1
+    if m1 == c2:
+      s2 = 0
+    else:
+      s2 = 1
+  total_payoffs1 = np.sum(payoffs1_list)
+  total_payoffs2 = np.sum(payoffs2_list)
+  return total_payoffs1, total_payoffs2
+
+
+def max_lik_cooperative_policy(estimated_payoffs1, estimated_payoffs2, player_ix):
+  # ToDo: currently implementing pure strategies only
+  best_act = None
+  best_welfare = -float('inf')
+  for a1 in range(2):
+    for a2 in range(2):
+      welfare = estimated_payoffs1[a1, a2] + estimated_payoffs2[a1, a2]
+      if welfare > best_welfare:
+        best_act = (a1, a2)
+        best_welfare = welfare
+  if player_ix == 0:
+    ai = best_act[0]
+    cj = best_act[1]
+  else:
+    ai = best_act[1]
+    cj = best_act[0]
+  return ai, ai, cj
+
+
+def max_lik_punishment_policy(estimated_payoffs1, estimated_payoffs2, player_ix):
+  pass
+
+
+def episode(payoffs1, payoffs2, interaction_policy1, interaction_policy2, n_choice_experiments, n_interactions,
+            temp1, temp2):
+  # Do choice experiments and estimate reward functions
+  probs_and_choices1 = generate_choice_experiments(payoffs1, n_choice_experiments)
+  probs_and_choices2 = generate_choice_experiments(payoffs2, n_choice_experiments)
+  # estimated_payoffs_ij = player j's estimate of player i's reward function
+  estimated_payoffs_11 = maximize_likelihood(probs_and_choices1, temp=temp1)
+  estimated_payoffs_21 = maximize_likelihood(probs_and_choices2, temp=temp1)
+  estimated_payoffs_12 = maximize_likelihood(probs_and_choices1, temp=temp2)
+  estimated_payoffs_22 = maximize_likelihood(probs_and_choices2, temp=temp2)
+
+  return
+
+
+
+
+
+
 
 
 
