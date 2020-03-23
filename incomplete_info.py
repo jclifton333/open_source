@@ -158,7 +158,6 @@ def interactions(payoffs1, payoffs2, policy1, policy2, n_interactions):
       punish2 = True
   total_payoffs1 = np.sum(payoffs1_list)
   total_payoffs2 = np.sum(payoffs2_list)
-  pdb.set_trace()
   return total_payoffs1, total_payoffs2
 
 
@@ -210,19 +209,23 @@ def max_lik_tft_policy(s, estimated_payoffs1, estimated_payoffs2, player_ix):
 
 
 def episode(payoffs1, payoffs2, interaction_policy1, interaction_policy2, n_choice_experiments, n_interactions,
-            temp1, temp2):
+            temp1, temp2, coord=False):
   # Do choice experiments and estimate reward functions
   probs_and_choices1 = generate_choice_experiments(payoffs1, n_choice_experiments)
   probs_and_choices2 = generate_choice_experiments(payoffs2, n_choice_experiments)
   # estimated_payoffs_ij = player j's estimate of player i's reward function
-  player_mi_prior_11 = np.random.normal(scale=0.5, size=(2, 2))
-  player_mi_prior_21 = np.random.normal(scale=0.5, size=(2, 2))
-  player_mi_prior_12 = np.random.normal(scale=0.5, size=(2, 2))
-  player_mi_prior_22 = np.random.normal(scale=0.5, size=(2, 2))
+  player_mi_prior_11 = np.random.normal(scale=0.0, size=(2, 2))
+  player_mi_prior_21 = np.random.normal(scale=0.0, size=(2, 2))
+  player_mi_prior_12 = np.random.normal(scale=0.0, size=(2, 2))
+  player_mi_prior_22 = np.random.normal(scale=0.0, size=(2, 2))
   estimated_payoffs_11 = maximize_likelihood(probs_and_choices1, payoffs_mi_prior=player_mi_prior_11, temp=temp1)
   estimated_payoffs_21 = maximize_likelihood(probs_and_choices2, payoffs_mi_prior=player_mi_prior_21, temp=temp1)
-  estimated_payoffs_12 = maximize_likelihood(probs_and_choices1, payoffs_mi_prior=player_mi_prior_12, temp=temp2)
-  estimated_payoffs_22 = maximize_likelihood(probs_and_choices2, payoffs_mi_prior=player_mi_prior_22, temp=temp2)
+  if coord:
+    estimated_payoffs_12 = maximize_likelihood(probs_and_choices1, payoffs_mi_prior=player_mi_prior_12, temp=temp1)
+    estimated_payoffs_22 = maximize_likelihood(probs_and_choices2, payoffs_mi_prior=player_mi_prior_22, temp=temp1)
+  else:
+    estimated_payoffs_12 = maximize_myopic_likelihood(probs_and_choices1, temp=temp1)
+    estimated_payoffs_22 = maximize_myopic_likelihood(probs_and_choices2, temp=temp1)
 
   # Fix interaction policies and run interaction phase
   policy1 = lambda s: interaction_policy1(s, estimated_payoffs_11, estimated_payoffs_21, 0)
@@ -236,8 +239,13 @@ def episode(payoffs1, payoffs2, interaction_policy1, interaction_policy2, n_choi
 if __name__ == "__main__":
   pd_payoffs1 = np.array([[-1., -3.], [0., -2.]])
   pd_payoffs2 = np.array([[-1., 0.], [-3., -2.]])
-  print(episode(pd_payoffs1, pd_payoffs2, max_lik_tft_policy, max_lik_tft_policy, 5, 5, 1., 2.))
-
+  uncoord_payoffs = np.zeros(2)
+  coord_payoffs = np.zeros(2)
+  for rep in range(10):
+    uncoord_payoffs += episode(pd_payoffs1, pd_payoffs2, max_lik_tft_policy, max_lik_tft_policy, 10, 5, 1., 1.)
+    coord_payoffs += episode(pd_payoffs1, pd_payoffs2, max_lik_tft_policy, max_lik_tft_policy, 10, 5, 1., 1., coord=True)
+  print(uncoord_payoffs)
+  print(coord_payoffs)
 
 
 
