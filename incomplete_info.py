@@ -21,7 +21,36 @@ set_detect_anomaly(True)
 """
 
 
-def single_choice_likelihood(probs1, probs2, choice, payoffs, temp=1.):
+def onehot(length, index):
+  encoding = np.zeros(length)
+  encoding[index] = 1
+  return encoding
+
+
+def optimal_profile(payoffs):
+  best_payoff = -float('inf')
+  best_profile = None
+  for a1 in range(payoffs.shape[0]):
+    for a2 in range(payoffs.shape[1]):
+      if payoffs[a1, a2] > best_payoff:
+        best_payoff = payoffs[a1, a2]
+        best_profile = (a1, a2)
+  return best_profile
+
+
+def choice_likelihood(probs_and_choices, payoffs_mi_prior, temp=1., n_interactions=5):
+  def log_lik(payoffs):
+    total_payoff = 0.
+    for probs1, probs2, choice in probs_and_choices:  # Compute myopic total
+      total_payoff += np.dot(probs1, payoffs)*(1-choice) + np.dot(probs2, payoffs)*choice
+    myopic_payoffs_estimate = maximize_myopic_likelihood(probs_and_choices, temp=temp)  # Myopic estimate of my reward
+    estimated_welfare_optimal_profile = optimal_profile(myopic_payoffs_estimate + payoffs_mi_prior)
+    expected_interaction_payoffs = n_interactions * payoffs.reshape((2, 2))[estimated_welfare_optimal_profile]
+    return np.exp((total_payoff + expected_interaction_payoffs) / temp)
+  return log_lik
+
+
+def myopic_single_choice_likelihood(probs1, probs2, choice, payoffs, temp=1.):
   """
   Construct likelihood function for a single choice between gambles.
 
@@ -38,7 +67,7 @@ def single_choice_likelihood(probs1, probs2, choice, payoffs, temp=1.):
   return -np.log((1-choice)*p1_boltzmann + choice*(1-p1_boltzmann))
 
 
-def choice_likelihood(probs_and_choices, temp=1., penalty=1.):
+def myopic_choice_likelihood(probs_and_choices, temp=1., penalty=1.):
   """
 
   :param probs_and_choices: List of tuples (probs1, probs2, choice)
@@ -48,13 +77,21 @@ def choice_likelihood(probs_and_choices, temp=1., penalty=1.):
   def log_lik(payoffs):
     log_lik_ = 0.
     for probs1, probs2, choice in probs_and_choices:
-      log_lik_ += single_choice_likelihood(probs1, probs2, choice, payoffs, temp=temp)
+      log_lik_ += myopic_single_choice_likelihood(probs1, probs2, choice, payoffs, temp=temp)
     return log_lik_ + penalty*np.dot(payoffs, payoffs)
   return log_lik
 
 
-def maximize_likelihood(probs_and_choices, temp=1.):
-  log_lik = choice_likelihood(probs_and_choices, temp=temp)
+def maximize_likelihood(probs_and_choices, payoffs_mi_prior=np.zeros((2, 2)), temp=1.):
+  log_lik = choice_likelihood(probs_and_choices, payoffs_mi_prior, temp=temp)
+  x0 = np.zeros(4)
+  res = minimize(log_lik, x0, method='L-BFGS-B')
+  max_lik_payoffs = res.x.reshape((2,2))
+  return max_lik_payoffs
+
+
+def maximize_myopic_likelihood(probs_and_choices, temp=1.):
+  log_lik = myopic_choice_likelihood(probs_and_choices, temp=temp)
   x0 = np.zeros(4)
   res = minimize(log_lik, x0, method='L-BFGS-B')
   max_lik_payoffs = res.x.reshape((2,2))
@@ -119,15 +156,14 @@ def interactions(payoffs1, payoffs2, policy1, policy2, n_interactions):
     else:
       s2 = 1
       punish2 = True
-    pdb.set_trace()
   total_payoffs1 = np.sum(payoffs1_list)
   total_payoffs2 = np.sum(payoffs2_list)
+  pdb.set_trace()
   return total_payoffs1, total_payoffs2
 
 
 def max_lik_cooperative_policy(estimated_payoffs1, estimated_payoffs2, player_ix):
   # ToDo: currently implementing pure strategies only
-  best_act = None
   best_welfare = -float('inf')
   for a1 in range(2):
     for a2 in range(2):
@@ -145,6 +181,7 @@ def max_lik_cooperative_policy(estimated_payoffs1, estimated_payoffs2, player_ix
 
 
 def max_lik_punishment_policy(estimated_payoffs1, estimated_payoffs2, player_ix):
+  # ToDo: implement mixed strategies
   if player_ix == 0:
     estimated_payoffs_mi = estimated_payoffs2
     max_axis = 0  # ToDo: check this, brain is farting
@@ -178,10 +215,14 @@ def episode(payoffs1, payoffs2, interaction_policy1, interaction_policy2, n_choi
   probs_and_choices1 = generate_choice_experiments(payoffs1, n_choice_experiments)
   probs_and_choices2 = generate_choice_experiments(payoffs2, n_choice_experiments)
   # estimated_payoffs_ij = player j's estimate of player i's reward function
-  estimated_payoffs_11 = maximize_likelihood(probs_and_choices1, temp=temp1)
-  estimated_payoffs_21 = maximize_likelihood(probs_and_choices2, temp=temp1)
-  estimated_payoffs_12 = maximize_likelihood(probs_and_choices1, temp=temp2)
-  estimated_payoffs_22 = maximize_likelihood(probs_and_choices2, temp=temp2)
+  player_mi_prior_11 = np.random.normal(scale=0.5, size=(2, 2))
+  player_mi_prior_21 = np.random.normal(scale=0.5, size=(2, 2))
+  player_mi_prior_12 = np.random.normal(scale=0.5, size=(2, 2))
+  player_mi_prior_22 = np.random.normal(scale=0.5, size=(2, 2))
+  estimated_payoffs_11 = maximize_likelihood(probs_and_choices1, payoffs_mi_prior=player_mi_prior_11, temp=temp1)
+  estimated_payoffs_21 = maximize_likelihood(probs_and_choices2, payoffs_mi_prior=player_mi_prior_21, temp=temp1)
+  estimated_payoffs_12 = maximize_likelihood(probs_and_choices1, payoffs_mi_prior=player_mi_prior_12, temp=temp2)
+  estimated_payoffs_22 = maximize_likelihood(probs_and_choices2, payoffs_mi_prior=player_mi_prior_22, temp=temp2)
 
   # Fix interaction policies and run interaction phase
   policy1 = lambda s: interaction_policy1(s, estimated_payoffs_11, estimated_payoffs_21, 0)
@@ -194,7 +235,7 @@ def episode(payoffs1, payoffs2, interaction_policy1, interaction_policy2, n_choi
 
 if __name__ == "__main__":
   pd_payoffs1 = np.array([[-1., -3.], [0., -2.]])
-  pd_payoffs2 = np.array([[-1., -3.], [0., -2.]])
+  pd_payoffs2 = np.array([[-1., 0.], [-3., -2.]])
   print(episode(pd_payoffs1, pd_payoffs2, max_lik_tft_policy, max_lik_tft_policy, 5, 5, 1., 2.))
 
 
