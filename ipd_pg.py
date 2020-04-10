@@ -277,6 +277,26 @@ class PD_PGLearner(metaclass=ABCMeta):
       # Plot
       self.plot_last_learning(label, multi_rep=True)
 
+  def coop_likelihood(self, indices_1, indices_2):
+    likelihood_coop_1 = \
+      np.prod(np.array(self.cooperative_likelihood_history)[indices_2, 0])
+    likelihood_coop_2 = \
+      np.prod(np.array(self.cooperative_likelihood_history)[indices_1, 1])
+    TOL = 0.5
+
+    p_bar_1_arr = \
+      np.array(self.bargaining_action_probs1)[indices_2]
+    pm_psq_1 = p_bar_1_arr - p_bar_1_arr**2
+    p_bar_2_arr = \
+      np.array(self.bargaining_action_probs2)[indices_1]
+    pm_psq_2 = p_bar_2_arr - p_bar_2_arr**2
+    var_bar_sum_1 = np.sum(2*pm_psq_1**3 * np.log(pm_psq_1)**2)
+    var_bar_sum_2 = np.sum(2*pm_psq_2**3 * np.log(pm_psq_2)**2)
+    lbar_c1 = np.log(likelihood_coop_1)/np.sqrt(2*var_bar_sum_1)
+    lbar_c2 = np.log(likelihood_coop_2)/np.sqrt(2*var_bar_sum_2)
+
+    return lbar_c1, lbar_c2
+
   def max_likelihood_from_cooperate_lists(self, cooperate_in_state_c_1,
                                           cooperate_in_state_d_1,
                                           cooperate_in_state_c_2,
@@ -418,7 +438,7 @@ class PD_PGLearner(metaclass=ABCMeta):
     no_punish_ixs_2 = [0]
     pvals_1 = []  
     pvals_2 = []
-    test_stat_save_points = [50, 100, 200]
+    test_stat_save_points = [n_epochs-1]
     test_stat_1_save= []
     test_stat_boot_1_save = []
     for i in range(n_epochs):
@@ -562,43 +582,27 @@ class PD_PGLearner(metaclass=ABCMeta):
         if i in test_stat_save_points:
           LOOK_BACK = i
           look_back = np.min((LOOK_BACK, i+1))
-          likelihood_coop_1 = np.prod(np.array(self.cooperative_likelihood_history)[no_punish_ixs_2[-look_back:-1], 0])
-          likelihood_coop_2 = np.prod(np.array(self.cooperative_likelihood_history)[no_punish_ixs_1[-look_back:-1], 1])
-          max_lik_stationary_1, max_lik_stationary_2, max_lik_var_1, max_lik_var_2, lbar_d1_boot = \
-            self.maximum_likelihood(no_punish_ixs_2[-look_back:], no_punish_ixs_1[-look_back:])
-          TOL = 0.5
+          ixs_1 = no_punish_ixs_1[-look_back:-1]
+          ixs_2 = no_punish_ixs_2[-look_back:-1]
+          max_lik_stationary_1, max_lik_stationary_2, max_lik_var_1, \
+            max_lik_var_2, lbar_d1_boot = self.maximum_likelihood(ixs_2, ixs_1)
+          lbar_c1, lbar_c2 = self.coop_likelihood(ixs_1, ixs_2)
 
-          # ratios_1 = []
-          # ratios_2 = []
-          # for b in range(100):
-          #   no_punish_ixs_1_b = np.random.choice(no_punish_ixs_1[-look_back], look_back)
-          #   no_punish_ixs_2_b = np.random.choice(no_punish_ixs_2[-look_back], look_back)
-          #   likelihood_coop_1_b = np.prod(np.array(self.cooperative_likelihood_history)[no_punish_ixs_2_b[:-1], 0])
-          #   likelihood_coop_2_b = np.prod(np.array(self.cooperative_likelihood_history)[no_punish_ixs_1_b[:-1], 1])
-            # ToDo: also need to pass indices of bootstrapped... indices to max_lik
-          #   max_lik_stationary_1_b, max_lik_stationary_2_b = self.maximum_likelihood(no_punish_ixs_2_b,
-          #                                                                           no_punish_ixs_1_b)
-          #   ratios_1.append(max_lik_stationary_1_b / likelihood_coop_1)
-          #   ratios_2.append(max_lik_stationary_2_b / likelihood_coop_2)
-          if i in test_stat_save_points:
-            initial_defect_lik_1 = max_lik_stationary_1 / likelihood_coop_1
-            initial_defect_lik_2 = max_lik_stationary_2 / likelihood_coop_2
+          # Bootstrap test statistic
+          test_stat_boot_1 = []
+          for b in range(len(lbar_d1_boot)):
+            ixs_1b = [np.random.choice(ixs_1) for _ in range(len(ixs_1))]
+            ixs_2b = [np.random.choice(ixs_2) for _ in range(len(ixs_2))]
+            lbar_c1b, _ = self.coop_likelihood(ixs_1b, ixs_2b)
+            test_stat_boot_1.append(lbar_c1b - lbar_d1_boot[b])
 
-          # Get p-values for likelihood hypothesis test
-          p_bar_1_arr = np.array(self.bargaining_action_probs1)[no_punish_ixs_2[:-1]]
-          pm_psq_1 = p_bar_1_arr - p_bar_1_arr**2
-          p_bar_2_arr = np.array(self.bargaining_action_probs2)[no_punish_ixs_1[:-1]]
-          pm_psq_2 = p_bar_2_arr - p_bar_2_arr**2
-          var_bar_sum_1 = np.sum(2*pm_psq_1**3 * np.log(pm_psq_1)**2)
-          var_bar_sum_2 = np.sum(2*pm_psq_2**3 * np.log(pm_psq_2)**2)
           lbar_d1 = np.log(max_lik_stationary_1)/np.sqrt(2*max_lik_var_1)
-          lbar_c1 = np.log(likelihood_coop_1)/np.sqrt(2*var_bar_sum_1)
           test_stat_1 = lbar_c1 - lbar_d1
           test_stat_2 = \
-            np.log(max_lik_stationary_2)/np.sqrt(2*max_lik_var_2) - np.log(likelihood_coop_2)/np.sqrt(2*var_bar_sum_2)
+            np.log(max_lik_stationary_2)/np.sqrt(2*max_lik_var_2) - lbar_c2 
           if i in test_stat_save_points:
-            test_stat_1_save.append(lbar_d1)
-            test_stat_boot_1_save.append(lbar_d1_boot)
+            test_stat_1_save.append(test_stat_1)
+            test_stat_boot_1_save.append(test_stat_boot_1)
           pval_1 = 1-norm.cdf(test_stat_1)
           pval_2 = 1-norm.cdf(test_stat_2)
           pvals_1.append(pval_1)
@@ -608,14 +612,12 @@ class PD_PGLearner(metaclass=ABCMeta):
           if pval_1 <= pval_cutoff:
             # self.defect1 = True
             self.defect1 = False
-            defect_lik_1 = max_lik_stationary_1 /likelihood_coop_1
           else:
             self.defect1 = False
             no_punish_ixs_1.append(i+1)
           if pval_2 < pval_cutoff:
             # self.defect2 = True
             self.defect2 = False
-            defect_lik_2 = max_lik_stationary_2 / likelihood_coop_2
           else:
             self.defect2 = False
             no_punish_ixs_2.append(i+1)
@@ -770,7 +772,7 @@ if __name__ == "__main__":
   stag_payoffs2 = np.array([[2., -3.], [0., 1.]])
 
   ipd = IPD_PG(payoffs1=pd_payoffs1, payoffs2=pd_payoffs2)
-  ipd.learn_multi_rep('pd-private-0.1', 50, 1, optim.gradient_ascent_minmax_reward,
+  ipd.learn_multi_rep('pd-private-0.1', 20, 1, optim.gradient_ascent_minmax_reward,
                       optim.gradient_ascent_minmax_reward, grad,
                       observable_seed=False, n_epochs=51,
                       pval_cutoff=0.1)
