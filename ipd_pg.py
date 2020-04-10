@@ -215,6 +215,8 @@ class PD_PGLearner(metaclass=ABCMeta):
     step_list = []
     cum_payoffs1 = []
     cum_payoffs2 = []
+    test_stat_1_dbn = []
+    test_stat_boot_1_dbn = []
     for rep in range(n_rep):
       results = self.learn(lr,
                           updater1,
@@ -244,6 +246,22 @@ class PD_PGLearner(metaclass=ABCMeta):
         cum_payoffs1.append(np.cumsum(np.array(results['payoffs1'])) / np.arange(1, n_epochs+1))
         cum_payoffs2.append(np.cumsum(np.array(results['payoffs2'])) / np.arange(1, n_epochs+1))
 
+      test_stat_1_dbn.append(results['test_stat_1'])
+      test_stat_boot_1_dbn.append(results['test_stat_boot_1'])
+
+    xbar = np.mean(test_stat_1_dbn)
+    coverages = []
+    for dbn in test_stat_boot_1_dbn:
+      l, u = np.percentile(dbn, [2.5, 97.5]) 
+      if l < xbar < u:
+        coverages.append(1)
+      else:
+        coverages.append(0)
+
+    pdb.set_trace()
+    plt.hist(test_stat_1_dbn)
+    plt.show()
+
     if plot_learning:
       # Get average values over each replicate
       self.pr_CC_log = np.hstack(pr_CC)
@@ -259,21 +277,10 @@ class PD_PGLearner(metaclass=ABCMeta):
       # Plot
       self.plot_last_learning(label, multi_rep=True)
 
-  def maximum_likelihood(self, no_punish_ixs_1_, no_punish_ixs_2_):
-    # look_back = np.min((look_back, len(self.action_history)-1))
-    # Get maximum likelihood stationary policies
-    # Player 1
-    cooperate_in_state_c_1 = np.array([ah[0] for ix, ah in enumerate(self.action_history[:-1])
-                                       if self.state_history[ix+1][0] == 0 and ix in no_punish_ixs_1_])
-    cooperate_in_state_d_1 = np.array([ah[0] for ix, ah in enumerate(self.action_history[:-1])
-                                       if self.state_history[ix+1][0] == 1 and ix in no_punish_ixs_1_])
-
-    # Player 2
-    cooperate_in_state_c_2 = np.array([ah[1] for ix, ah in enumerate(self.action_history[:-1])
-                                       if self.state_history[ix+1][1] == 0 and ix in no_punish_ixs_2_])
-    cooperate_in_state_d_2 = np.array([ah[1] for ix, ah in enumerate(self.action_history[:-1])
-                                       if self.state_history[ix+1][1] == 1 and ix in no_punish_ixs_2_])
-
+  def max_likelihood_from_cooperate_lists(self, cooperate_in_state_c_1,
+                                          cooperate_in_state_d_1,
+                                          cooperate_in_state_c_2,
+                                          cooperate_in_state_d_2):
     # Max likelihood parameters
     p1_c, p1_d = np.mean(1-cooperate_in_state_c_1), np.mean(1-cooperate_in_state_d_1)
     p2_c, p2_d = np.mean(1-cooperate_in_state_c_2), np.mean(1-cooperate_in_state_d_2)
@@ -296,6 +303,45 @@ class PD_PGLearner(metaclass=ABCMeta):
     var_max_lik_2 = 2*(p2_c-p2_c**2)**3 * np.log(p2_c-p2_c**2)**2*n_cc_2 + 2*(p2_d-p2_d**2)**3 * np.log(p2_d-p2_d**2)**2*n_dc_2
 
     return max_lik_1, max_lik_2, var_max_lik_1, var_max_lik_2
+
+  def maximum_likelihood(self, no_punish_ixs_1_, no_punish_ixs_2_):
+    # look_back = np.min((look_back, len(self.action_history)-1))
+    # Get maximum likelihood stationary policies
+    # Player 1
+    cooperate_in_state_c_1 = np.array([ah[0] for ix, ah in enumerate(self.action_history[:-1])
+                                       if self.state_history[ix+1][0] == 0 and ix in no_punish_ixs_1_])
+    cooperate_in_state_d_1 = np.array([ah[0] for ix, ah in enumerate(self.action_history[:-1])
+                                       if self.state_history[ix+1][0] == 1 and ix in no_punish_ixs_1_])
+
+    # Player 2
+    cooperate_in_state_c_2 = np.array([ah[1] for ix, ah in enumerate(self.action_history[:-1])
+                                       if self.state_history[ix+1][1] == 0 and ix in no_punish_ixs_2_])
+    cooperate_in_state_d_2 = np.array([ah[1] for ix, ah in enumerate(self.action_history[:-1])
+                                       if self.state_history[ix+1][1] == 1 and ix in no_punish_ixs_2_])
+
+    # Bootstrap - scratchwork
+    t1 = []
+    for b in range(50):
+      c1b = np.array([np.random.choice(cooperate_in_state_c_1) for _ in
+             range(len(cooperate_in_state_c_1))])
+      d1b = np.array([np.random.choice(cooperate_in_state_d_1) for _ in
+             range(len(cooperate_in_state_d_1))])
+      c2b = np.array([np.random.choice(cooperate_in_state_c_2) for _ in
+             range(len(cooperate_in_state_c_2))])
+      d2b = np.array([np.random.choice(cooperate_in_state_d_2) for _ in
+             range(len(cooperate_in_state_d_2))])
+      m1b, _, v1b, _ = self.max_likelihood_from_cooperate_lists(c1b, d1b, c2b, d2b)
+      t1b = np.log(m1b) / np.sqrt(2*v1b)
+      if not np.isnan(t1b):
+        t1.append(np.log(m1b) / np.sqrt(2*v1b))
+
+    max_lik_1, max_lik_2, var_max_lik_1, var_max_lik_2 = \
+      self.max_likelihood_from_cooperate_lists(cooperate_in_state_c_1,
+                                              cooperate_in_state_d_1,
+                                              cooperate_in_state_c_2,
+                                              cooperate_in_state_d_2)
+
+    return max_lik_1, max_lik_2, var_max_lik_1, var_max_lik_2, t1
 
   def learn(self,
             lr,
@@ -372,6 +418,9 @@ class PD_PGLearner(metaclass=ABCMeta):
     no_punish_ixs_2 = [0]
     pvals_1 = []  
     pvals_2 = []
+    test_stat_save_points = [50, 100, 200]
+    test_stat_1_save= []
+    test_stat_boot_1_save = []
     for i in range(n_epochs):
       print(i)
 
@@ -510,14 +559,15 @@ class PD_PGLearner(metaclass=ABCMeta):
         self.bargaining_action_probs1.append(p_a1_barg)
         self.bargaining_action_probs2.append(p_a2_barg)
         self.cooperative_likelihood_history.append([p_a1_barg, p_a2_barg])
-        LOOK_BACK = i
-        look_back = np.min((LOOK_BACK, i+1))
-        likelihood_coop_1 = np.prod(np.array(self.cooperative_likelihood_history)[no_punish_ixs_2[-look_back:-1], 0])
-        likelihood_coop_2 = np.prod(np.array(self.cooperative_likelihood_history)[no_punish_ixs_1[-look_back:-1], 1])
-        max_lik_stationary_1, max_lik_stationary_2, max_lik_var_1, max_lik_var_2 = \
-          self.maximum_likelihood(no_punish_ixs_2[-look_back:], no_punish_ixs_1[-look_back:])
-        TOL = 0.5
-        if i > 50:
+        if i in test_stat_save_points:
+          LOOK_BACK = i
+          look_back = np.min((LOOK_BACK, i+1))
+          likelihood_coop_1 = np.prod(np.array(self.cooperative_likelihood_history)[no_punish_ixs_2[-look_back:-1], 0])
+          likelihood_coop_2 = np.prod(np.array(self.cooperative_likelihood_history)[no_punish_ixs_1[-look_back:-1], 1])
+          max_lik_stationary_1, max_lik_stationary_2, max_lik_var_1, max_lik_var_2, lbar_d1_boot = \
+            self.maximum_likelihood(no_punish_ixs_2[-look_back:], no_punish_ixs_1[-look_back:])
+          TOL = 0.5
+
           # ratios_1 = []
           # ratios_2 = []
           # for b in range(100):
@@ -530,7 +580,7 @@ class PD_PGLearner(metaclass=ABCMeta):
           #                                                                           no_punish_ixs_1_b)
           #   ratios_1.append(max_lik_stationary_1_b / likelihood_coop_1)
           #   ratios_2.append(max_lik_stationary_2_b / likelihood_coop_2)
-          if i == 51:
+          if i in test_stat_save_points:
             initial_defect_lik_1 = max_lik_stationary_1 / likelihood_coop_1
             initial_defect_lik_2 = max_lik_stationary_2 / likelihood_coop_2
 
@@ -541,23 +591,30 @@ class PD_PGLearner(metaclass=ABCMeta):
           pm_psq_2 = p_bar_2_arr - p_bar_2_arr**2
           var_bar_sum_1 = np.sum(2*pm_psq_1**3 * np.log(pm_psq_1)**2)
           var_bar_sum_2 = np.sum(2*pm_psq_2**3 * np.log(pm_psq_2)**2)
-          test_stat_1 = \
-            np.log(max_lik_stationary_1)/np.sqrt(2*max_lik_var_1) - np.log(likelihood_coop_1)/np.sqrt(2*var_bar_sum_1)
+          lbar_d1 = np.log(max_lik_stationary_1)/np.sqrt(2*max_lik_var_1)
+          lbar_c1 = np.log(likelihood_coop_1)/np.sqrt(2*var_bar_sum_1)
+          test_stat_1 = lbar_c1 - lbar_d1
           test_stat_2 = \
             np.log(max_lik_stationary_2)/np.sqrt(2*max_lik_var_2) - np.log(likelihood_coop_2)/np.sqrt(2*var_bar_sum_2)
-          pval_1 = norm.cdf(1-test_stat_1)
-          pval_2 = norm.cdf(1-test_stat_2)
+          if i in test_stat_save_points:
+            test_stat_1_save.append(lbar_d1)
+            test_stat_boot_1_save.append(lbar_d1_boot)
+          pval_1 = 1-norm.cdf(test_stat_1)
+          pval_2 = 1-norm.cdf(test_stat_2)
           pvals_1.append(pval_1)
           pvals_2.append(pval_2)
           print('pval1: {} pval2: {}'.format(pval_1, pval_2))
+          # ToDo: never detect defections; for debugging
           if pval_1 <= pval_cutoff:
-            self.defect1 = True
+            # self.defect1 = True
+            self.defect1 = False
             defect_lik_1 = max_lik_stationary_1 /likelihood_coop_1
           else:
             self.defect1 = False
             no_punish_ixs_1.append(i+1)
           if pval_2 < pval_cutoff:
-            self.defect2 = True
+            # self.defect2 = True
+            self.defect2 = False
             defect_lik_2 = max_lik_stationary_2 / likelihood_coop_2
           else:
             self.defect2 = False
@@ -582,7 +639,8 @@ class PD_PGLearner(metaclass=ABCMeta):
     if plot_learning:
       self.plot_last_learning()
     return {'pr_CC':self.pr_CC_log, 'pr_DD': self.pr_DD_log, 'payoffs1': self.payoffs1_log,
-            'payoffs2': self.payoffs2_log}
+            'payoffs2': self.payoffs2_log, 'test_stat_1': test_stat_1_save,
+            'test_stat_boot_1': test_stat_boot_1_save}
 
   def plot_last_learning(self, label, multi_rep):
     if self.pr_CC_log is not None:
@@ -712,11 +770,9 @@ if __name__ == "__main__":
   stag_payoffs2 = np.array([[2., -3.], [0., 1.]])
 
   ipd = IPD_PG(payoffs1=pd_payoffs1, payoffs2=pd_payoffs2)
-  ipd.learn_multi_rep('pd-vs-naive-0.001', 20, 1, optim.gradient_ascent_minmax_reward,
-                      optim.naive_gradient_ascent, grad, observable_seed=False, n_epochs=1000,
-                      pval_cutoff=0.001)
-  ipd.learn_multi_rep('pd-private-0.1', 20, 1, optim.gradient_ascent_minmax_reward,
-                      optim.gradient_ascent_minmax_reward, grad, observable_seed=False, n_epochs=1000,
+  ipd.learn_multi_rep('pd-private-0.1', 50, 1, optim.gradient_ascent_minmax_reward,
+                      optim.gradient_ascent_minmax_reward, grad,
+                      observable_seed=False, n_epochs=51,
                       pval_cutoff=0.1)
   ipd.learn_multi_rep('pd-private-0.01', 20, 1, optim.gradient_ascent_minmax_reward,
                       optim.gradient_ascent_minmax_reward, grad, observable_seed=False, n_epochs=1000,
